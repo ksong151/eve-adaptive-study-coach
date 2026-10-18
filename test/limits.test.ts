@@ -217,3 +217,30 @@ describe("reading long and truncated text", () => {
   });
 });
 
+describe("budget accounting and retries", () => {
+  test("bytes downloaded before a size rejection still count, and that rejection is retried later", async () => {
+    const big = () => new Response("y".repeat(5000), { status: 200, headers: { "content-type": "application/pdf" } });
+    const { index, mock, id } = await course(`<a href="big.pdf">Big</a>`, { [`${START_URL}big.pdf`]: big });
+    LIMITS.maxBytesPerCourse = index.usage.bytes + 50; // the budget, not the PDF limit, causes the rejection
+    const result = await read(index, id("big.pdf"), mock.transport);
+    assert.equal(!result.read && result.reason, "response_too_large");
+    const after = await loadCourse(index.courseId);
+    assert.ok(after.usage.bytes > index.usage.bytes + 50, "the downloaded bytes were counted");
+    assert.equal(after.resources.find((r) => r.id === id("big.pdf"))?.extraction, undefined, "not recorded as a permanent failure");
+  });
+
+  test("server errors and rate limiting are retried on the next read", async () => {
+    for (const status of [503, 429]) {
+      useTempDataDir();
+      let calls = 0;
+      const { index, mock, id } = await course(`<a href="a.pdf">Alpha</a>`, {
+        [`${START_URL}a.pdf`]: () => (++calls === 1 ? new Response("busy", { status }) : pdf(makePdf([["page a"]]))()),
+      });
+      const first = await read(index, id("a.pdf"), mock.transport);
+      assert.equal(!first.read && first.reason, "http_error", String(status));
+      const second = await read(await loadCourse(index.courseId), id("a.pdf"), mock.transport);
+      assert.equal(second.read, true, `${status} is retried`);
+    }
+  });
+});
+

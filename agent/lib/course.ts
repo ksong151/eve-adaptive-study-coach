@@ -340,8 +340,13 @@ async function readResourceUnlocked(
     }
   } catch (error) {
     if (!(error instanceof FetchRejected)) throw error;
-    // Timeouts and network errors may be transient, so they are not cached as failures.
-    const transient = error.reason === "timeout" || error.reason === "network_error";
+    index.usage.bytes += error.bytesRead;
+    // Failures that may succeed later are not recorded, so the next read retries them:
+    // timeouts, network errors, rate limiting and server errors, and size rejections
+    // that happened only because little of the course's byte budget was left.
+    const retryableHttp = error.reason === "http_error" && (error.status === 429 || (error.status ?? 0) >= 500);
+    const budgetLimited = error.reason === "response_too_large" && remainingBytes < limits.maxBytes;
+    const transient = error.reason === "timeout" || error.reason === "network_error" || retryableHttp || budgetLimited;
     if (!transient) r.extraction = { status: "failed", reason: error.reason, detail: error.message, at: now };
     result = notRead(index, r, error.reason, error.message);
   }

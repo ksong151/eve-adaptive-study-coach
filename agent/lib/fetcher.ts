@@ -39,11 +39,17 @@ export type FetchFailure =
 export class FetchRejected extends Error {
   readonly reason: FetchFailure;
   readonly url: string;
-  constructor(reason: FetchFailure, url: string, message: string) {
+  /** HTTP status, for http_error. */
+  readonly status?: number;
+  /** Body bytes already downloaded before the failure; they still count against budgets. */
+  readonly bytesRead: number;
+  constructor(reason: FetchFailure, url: string, message: string, details: { status?: number; bytesRead?: number } = {}) {
     super(message);
     this.name = "FetchRejected";
     this.reason = reason;
     this.url = url;
+    this.status = details.status;
+    this.bytesRead = details.bytesRead ?? 0;
   }
 }
 
@@ -127,7 +133,7 @@ export async function boundedFetch(
 
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
-      throw new FetchRejected("http_error", url.href, `${url.href} returned HTTP ${response.status}.`);
+      throw new FetchRejected("http_error", url.href, `${url.href} returned HTTP ${response.status}.`, { status: response.status });
     }
 
     const declared = (response.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
@@ -166,17 +172,17 @@ async function readBounded(response: Response, maxBytes: number, signal: AbortSi
         chunk = await reader.read();
       } catch (error) {
         // An aborted request can error the body stream before the abort listener runs.
-        if (signal.aborted) throw new FetchRejected("timeout", url, `Reading ${url} timed out.`);
+        if (signal.aborted) throw new FetchRejected("timeout", url, `Reading ${url} timed out.`, { bytesRead: total });
         const message = error instanceof Error ? error.message : String(error);
-        throw new FetchRejected("network_error", url, `Reading ${url} failed: ${message}`);
+        throw new FetchRejected("network_error", url, `Reading ${url} failed: ${message}`, { bytesRead: total });
       }
       const { done, value } = chunk;
-      if (signal.aborted) throw new FetchRejected("timeout", url, `Reading ${url} timed out.`);
+      if (signal.aborted) throw new FetchRejected("timeout", url, `Reading ${url} timed out.`, { bytesRead: total });
       if (done) break;
       total += value.byteLength;
       if (total > maxBytes) {
         await reader.cancel().catch(() => {});
-        throw new FetchRejected("response_too_large", url, `${url} exceeded the ${maxBytes}-byte limit.`);
+        throw new FetchRejected("response_too_large", url, `${url} exceeded the ${maxBytes}-byte limit.`, { bytesRead: total });
       }
       chunks.push(value);
     }

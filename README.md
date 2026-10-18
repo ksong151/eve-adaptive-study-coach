@@ -9,7 +9,7 @@ It is a learning aid, not affiliated with any course. It is told to follow each 
 - Node.js with built-in TypeScript type stripping. `package.json` declares Node 24, the scaffold default; this project was tested only on Node 26.8.1.
 - A model connection: run `npm run dev` and use `/login`, or set `AI_GATEWAY_API_KEY` in `.env.local` (git-ignored). The default model is `openai/gpt-6-luna-fast` through Vercel AI Gateway (`agent/agent.ts`).
 
-Tests, the importer, and `npm run inspect` need no model connection.
+Tests and `npm run inspect` need no model connection.
 
 ## Commands
 
@@ -25,6 +25,8 @@ npm run reset-progress
 ```
 
 Example prompt in `npm run dev`: *"My course is https://cs144.github.io/. Quiz me on how TCP sequence numbers work."*
+
+Eval status: on 2026-10-18 at commit `23e39d8`, `npm run eval` ran against a live model through a ChatGPT login. All 7 tool-call checks passed. The 3 judge-graded checks did not run, because the default judge model needs AI Gateway access.
 
 ## Architecture
 
@@ -66,7 +68,7 @@ Observations are `demonstrated`, `partially_demonstrated`, `needs_review`, or `u
 
 Real network runs with no model; course sites change, so results may differ.
 
-`npm run inspect -- https://cs144.github.io/ --read r31` made one request for the page, found 19 readable and 16 external links, and read 8 pages from the TCP slides:
+`npm run inspect -- https://cs144.github.io/ --read r31` made one request for the page, found 19 readable and 16 external links, and read 8 pages from the TCP slides. An excerpt of its output, with column spacing condensed:
 
 ```text
 r23   readable  pdf   Checkpoint 0: networking warmup
@@ -92,10 +94,11 @@ READ r31 "Slides (week-2-tcp.pdf)" (8 pages)
 - `npm run inspect` uses the same `.study-coach/` folder as the agent, so it replaces that course's index and resets its read budget.
 - Not built for deployment: progress and cached text are written to a local folder.
 - The model may use terms the course material does not, and may save near-duplicate concept names that differ by more than case or spacing.
+- `npm audit` reports a moderate advisory in `sprintf-js`, which only the scaffold's `just-bash` sandbox uses. No tool runs the sandbox, and no patched version exists.
 - Single user, local files. Writes are serialized within one process; two processes sharing one `.study-coach/` folder can still conflict.
 - Question and feedback quality and the observation label depend on the model and are not validated assessments.
 - The learner-URL check needs the URL in the model's context; after compaction the learner may need to paste it again. It proves the learner wrote the URL, not that they meant to approve it.
 
 ## License
 
-MIT (`LICENSE`). The repository contains no course content; fetched text is cached locally and never committed.
+MIT (`LICENSE`). The repository contains no copies of course materials. `docs/example-session.md` includes the coach's short paraphrases of CS144 slides from one session. Fetched text is cached locally and never committed.

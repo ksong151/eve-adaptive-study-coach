@@ -2,7 +2,7 @@
 // small course from mocked routes.
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { importCourse, readResource, listCourses, loadCourse, LIMITS, type CourseIndex } from "../agent/lib/course.ts";
+import { courseIdFor, importCourse, readResource, listCourses, loadCourse, LIMITS, type CourseIndex } from "../agent/lib/course.ts";
 import { recordAttempt } from "../agent/lib/progress.ts";
 import { html, makePdf, mockTransport, pdf, redirect, useTempDataDir, START_URL, FIXTURE_ORIGIN, type Route } from "./helpers.ts";
 import { EXTRACT_LIMITS } from "../agent/lib/extract.ts";
@@ -268,4 +268,13 @@ describe("cached text and course ids", () => {
     );
   });
 
+  test("course ids stay distinct for locations that slug the same, and stay stable", () => {
+    const id = (u: string) => courseIdFor(new URL(u));
+    assert.notEqual(id("https://a.b.edu/cs-1/"), id("https://a-b.edu/cs/1/"));
+    assert.notEqual(id("https://site.test/CS107/"), id("https://site.test/cs107/"));
+    const long = "https://site.test/" + "x".repeat(90);
+    assert.notEqual(id(`${long}/one/`), id(`${long}/two/`));
+    assert.equal(id("https://site.test/c/index.html"), id("https://site.test/c/"), "same directory, same id");
+    for (const u of ["https://a.b.edu/cs-1/", `${long}/one/`]) assert.match(id(u), /^[a-z0-9-]{1,80}$/);
+  });
 });

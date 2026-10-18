@@ -22,7 +22,7 @@ describe("course import and reading (mocked HTTP)", () => {
 
   test("import makes exactly one request: the start page", () => {
     assert.deepEqual(mock.requests, [START_URL]);
-    assert.equal(index.courseId, "toy-course-example-toy101");
+    assert.match(index.courseId, /^toy-course-example-toy101-[0-9a-f]{8}$/);
     assert.equal(index.resources[0]?.id, "r1");
     assert.equal(index.resources[0]?.extraction?.status, "extracted");
   });

@@ -3,7 +3,7 @@
 import type { ToolStub } from "eve/evals";
 
 export const COURSE_URL = "https://toy-course.example/toy101/";
-export const COURSE_ID = "toy-course-example-toy101";
+export const COURSE_ID = "toy-course-example-toy101-60b8adfe";
 
 const importResult = {
   courseId: COURSE_ID,

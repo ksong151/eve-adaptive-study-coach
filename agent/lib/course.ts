@@ -1,5 +1,6 @@
 // Course import, resource listing, and resource reading. Tools call these
 // functions; tests call them directly with a mocked transport.
+import { createHash } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { readJson, writeJson, courseFile, contentFile, coursesLock, dataDir, withLock } from "./store.ts";
@@ -76,13 +77,21 @@ export class CourseError extends Error {
   }
 }
 
-/** Stable id from the start page's host and directory, e.g. "web-stanford-edu-class-cs107". */
+/**
+ * Stable id from the start page's host and directory: a readable slug plus a
+ * hash of the exact (case-sensitive) location, so "a.b.edu/cs-1/" and
+ * "a-b.edu/cs/1/" do not share an id. Example: "web-stanford-edu-class-cs107-98c6589c".
+ */
 export function courseIdFor(startUrl: URL): string {
-  const slug = `${startUrl.hostname}${directoryPrefix(startUrl)}`
+  const location = `${startUrl.host}${directoryPrefix(startUrl)}`;
+  const hash = createHash("sha256").update(location).digest("hex").slice(0, 8);
+  const slug = location
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug.slice(0, 80);
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 70)
+    .replace(/-+$/, "");
+  return `${slug}-${hash}`;
 }
 
 export async function loadCourse(courseId: string): Promise<CourseIndex> {

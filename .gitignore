@@ -8,3 +8,6 @@ node_modules
 dist
 .DS_Store
 *.tsbuildinfo
+
+# Local study data: progress, course indexes, fetched course text
+.study-coach

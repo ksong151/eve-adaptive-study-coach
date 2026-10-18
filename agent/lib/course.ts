@@ -1,0 +1,383 @@
+// Course import, resource listing, and resource reading. Tools call these
+// functions; tests call them directly with a mocked transport.
+import { readdir } from "node:fs/promises";
+import path from "node:path";
+import { readJson, writeJson, courseFile, contentFile, dataDir } from "./store.ts";
+import { buildScope, checkPublicHttpsUrl, describeScope, directoryPrefix, type CourseScope } from "./scope.ts";
+import { boundedFetch, FetchRejected, type FetchLimits, type SupportedContentType, type Transport } from "./fetcher.ts";
+import { discoverLinks, type ResourceKind, type ResourceStatus } from "./links.ts";
+import { extractHtml, extractPdf, extractPlainText, type Extraction, type ExtractedPage } from "./extract.ts";
+
+export const LIMITS = {
+  /** Links kept from the start page. */
+  maxIndexedLinks: 250,
+  /** Network reads per imported course (cached reads are free). */
+  maxFetchesPerCourse: 30,
+  /** Bytes downloaded per imported course. */
+  maxBytesPerCourse: 60 * 1024 * 1024,
+  html: { maxBytes: 2 * 1024 * 1024, timeoutMs: 15_000, maxRedirects: 3 } satisfies FetchLimits,
+  pdf: { maxBytes: 15 * 1024 * 1024, timeoutMs: 30_000, maxRedirects: 3 } satisfies FetchLimits,
+  /** Characters of source text returned per read_resource call. */
+  maxCharsPerRead: 12_000,
+};
+
+/** Shown in place of a PDF page that has no text layer (often a diagram or photo). */
+export const EMPTY_PAGE = "[No extractable text on this page. It may be an image; its contents were not read.]";
+
+export interface ExtractionRecord {
+  status: "extracted" | "failed";
+  /** Failure reason, or "" when extracted. */
+  reason: string;
+  detail: string;
+  at: string;
+}
+
+export interface Resource {
+  id: string;
+  url: string;
+  title: string;
+  section: string;
+  kind: ResourceKind;
+  status: ResourceStatus;
+  note: string;
+  extraction?: ExtractionRecord;
+}
+
+export interface CourseIndex {
+  version: 1;
+  courseId: string;
+  startUrl: string;
+  pageTitle: string;
+  scope: CourseScope;
+  importedAt: string;
+  truncatedLinks: number;
+  usage: { fetches: number; bytes: number };
+  resources: Resource[];
+}
+
+export interface CachedContent {
+  url: string;
+  finalUrl: string;
+  title: string;
+  kind: "html" | "pdf" | "text";
+  text?: string;
+  pages?: ExtractedPage[];
+  totalPages?: number;
+  bytes: number;
+  extractedAt: string;
+}
+
+export class CourseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CourseError";
+  }
+}
+
+export function courseIdFor(scope: CourseScope): string {
+  const first = scope.entries[0]!;
+  const slug = `${new URL(first.origin).hostname}${first.pathPrefix}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug.slice(0, 80);
+}
+
+export async function loadCourse(courseId: string): Promise<CourseIndex> {
+  if (!/^[a-z0-9-]{1,80}$/.test(courseId)) throw new CourseError(`Invalid course id: ${courseId}`);
+  const index = await readJson<CourseIndex>(courseFile(courseId));
+  if (!index) throw new CourseError(`No imported course with id "${courseId}". Import it first with import_course.`);
+  return index;
+}
+
+const ALLOWED_TYPES: Record<Exclude<ResourceKind, "other">, SupportedContentType[]> = {
+  html: ["text/html", "text/plain"],
+  pdf: ["application/pdf"],
+  text: ["text/plain"],
+};
+
+function extractionToCache(extraction: Extraction & { ok: true }, url: string, finalUrl: string, bytes: number): CachedContent {
+  const base = { url, finalUrl, title: extraction.title, kind: extraction.kind, bytes, extractedAt: new Date().toISOString() };
+  return extraction.kind === "pdf"
+    ? { ...base, pages: extraction.pages, totalPages: extraction.totalPages }
+    : { ...base, text: extraction.text };
+}
+
+async function extract(bytes: Uint8Array, contentType: SupportedContentType): Promise<Extraction> {
+  if (contentType === "application/pdf") return extractPdf(bytes);
+  const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  return contentType === "text/html" ? extractHtml(text) : extractPlainText(text);
+}
+
+/**
+ * Fetches one start page (the only request this makes), indexes its direct
+ * links, and saves the index. Callers must already have confirmed that
+ * startUrl and additionalScopes came from the learner.
+ */
+export async function importCourse(
+  input: { startUrl: string; additionalScopes: readonly string[] },
+  deps: { transport: Transport; signal?: AbortSignal },
+): Promise<CourseIndex> {
+  const start = checkPublicHttpsUrl(input.startUrl);
+  if (!start.allowed) throw new CourseError(`Start page rejected: ${start.detail}`);
+  const built = buildScope(start.url, input.additionalScopes);
+  if ("error" in built) throw new CourseError(built.error);
+  const { scope } = built;
+
+  let fetched;
+  try {
+    fetched = await boundedFetch(start.url.href, scope, {
+      transport: deps.transport,
+      limits: LIMITS.html,
+      allowedTypes: ["text/html"],
+      signal: deps.signal,
+    });
+  } catch (error) {
+    if (error instanceof FetchRejected) throw new CourseError(`Could not import ${start.url.href}: ${error.message}`);
+    throw error;
+  }
+
+  const html = new TextDecoder().decode(fetched.bytes);
+  const discovered = discoverLinks(html, fetched.finalUrl, scope, LIMITS.maxIndexedLinks);
+  const startExtraction = extractHtml(html);
+  const now = new Date().toISOString();
+
+  const startResource: Resource = {
+    id: "r1",
+    url: fetched.finalUrl,
+    title: discovered.pageTitle || "Course start page",
+    section: "",
+    kind: "html",
+    status: "readable",
+    note: "The page you supplied.",
+    extraction: startExtraction.ok
+      ? { status: "extracted", reason: "", detail: "", at: now }
+      : { status: "failed", reason: startExtraction.reason, detail: startExtraction.detail, at: now },
+  };
+  if (startExtraction.ok) {
+    await writeJson(contentFile(fetched.finalUrl), extractionToCache(startExtraction, fetched.finalUrl, fetched.finalUrl, fetched.bytes.byteLength));
+  }
+
+  const resources: Resource[] = [startResource];
+  for (const link of discovered.links) {
+    if (link.url === fetched.finalUrl) continue;
+    resources.push({ id: `r${resources.length + 1}`, ...link });
+  }
+
+  const index: CourseIndex = {
+    version: 1,
+    courseId: courseIdFor(scope),
+    startUrl: fetched.finalUrl,
+    pageTitle: discovered.pageTitle,
+    scope,
+    importedAt: now,
+    truncatedLinks: discovered.truncated,
+    usage: { fetches: 1, bytes: fetched.bytes.byteLength },
+    resources,
+  };
+  await writeJson(courseFile(index.courseId), index);
+  return index;
+}
+
+/** Same-site path prefixes that hold out-of-scope links, to help the learner decide on scope. */
+export function outsideScopePrefixes(index: CourseIndex): Array<{ prefix: string; links: number }> {
+  const counts = new Map<string, number>();
+  for (const r of index.resources) {
+    if (r.status !== "outside_scope") continue;
+    const url = new URL(r.url);
+    const dir = directoryPrefix(url);
+    const segments = dir.split("/").filter(Boolean);
+    const key = `${url.origin}/${segments.slice(0, Math.min(2, segments.length)).join("/")}${segments.length ? "/" : ""}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([prefix, links]) => ({ prefix, links })).sort((a, b) => b.links - a.links);
+}
+
+export function summarizeIndex(index: CourseIndex) {
+  const byStatus: Record<string, number> = {};
+  for (const r of index.resources) byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
+  return {
+    courseId: index.courseId,
+    startUrl: index.startUrl,
+    pageTitle: index.pageTitle,
+    approvedScope: describeScope(index.scope),
+    resourceCounts: byStatus,
+    truncatedLinks: index.truncatedLinks,
+    outsideScopePrefixes: outsideScopePrefixes(index).slice(0, 5),
+  };
+}
+
+export type ReadResult =
+  | {
+      read: true;
+      courseId: string;
+      resourceId: string;
+      title: string;
+      url: string;
+      kind: "html" | "pdf" | "text";
+      /** PDF: the pages returned in this call. */
+      pages?: ExtractedPage[];
+      totalPages?: number;
+      nextPage?: number;
+      /** HTML/text: the slice returned in this call. */
+      text?: string;
+      offset?: number;
+      nextOffset?: number;
+      totalChars?: number;
+    }
+  | {
+      read: false;
+      courseId: string;
+      resourceId: string;
+      title: string;
+      url: string;
+      reason: string;
+      detail: string;
+    };
+
+function notRead(index: CourseIndex, r: Resource, reason: string, detail: string): ReadResult {
+  return { read: false, courseId: index.courseId, resourceId: r.id, title: r.title, url: r.url, reason, detail };
+}
+
+function windowContent(index: CourseIndex, r: Resource, content: CachedContent, page: number, offset: number): ReadResult {
+  const base = { read: true as const, courseId: index.courseId, resourceId: r.id, title: content.title || r.title, url: r.url, kind: content.kind };
+  if (content.kind === "pdf") {
+    const pages = content.pages ?? [];
+    const out: ExtractedPage[] = [];
+    let chars = 0;
+    for (const p of pages) {
+      if (p.page < page) continue;
+      if (out.length > 0 && chars + p.text.length > LIMITS.maxCharsPerRead) break;
+      const text =
+        p.text.length === 0
+          ? EMPTY_PAGE
+          : p.text.length > LIMITS.maxCharsPerRead
+            ? `${p.text.slice(0, LIMITS.maxCharsPerRead)} [page truncated]`
+            : p.text;
+      out.push({ page: p.page, text });
+      chars += text.length;
+    }
+    const last = out.at(-1)?.page;
+    const next = last === undefined ? undefined : pages.find((p) => p.page > last)?.page;
+    return { ...base, pages: out, totalPages: content.totalPages, nextPage: next };
+  }
+  const text = content.text ?? "";
+  const slice = text.slice(offset, offset + LIMITS.maxCharsPerRead);
+  const nextOffset = offset + slice.length < text.length ? offset + slice.length : undefined;
+  return { ...base, text: slice, offset, nextOffset, totalChars: text.length };
+}
+
+/**
+ * Reads an indexed resource by id. Fetches only when the resource is
+ * "readable" (in scope, supported format) and not already cached; failures
+ * are recorded on the index and returned as read: false.
+ */
+export async function readResource(
+  input: { courseId: string; resourceId: string; page?: number; offset?: number },
+  deps: { transport: Transport; signal?: AbortSignal },
+): Promise<ReadResult> {
+  const index = await loadCourse(input.courseId);
+  const r = index.resources.find((res) => res.id === input.resourceId);
+  if (!r) throw new CourseError(`Resource "${input.resourceId}" is not in course "${index.courseId}". Use list_resources to see valid ids.`);
+  const page = input.page ?? 1;
+  const offset = input.offset ?? 0;
+
+  if (r.status !== "readable" || r.kind === "other") {
+    return notRead(index, r, r.status, r.note || "This resource is listed only; its contents were not fetched.");
+  }
+
+  const cached = await readJson<CachedContent>(contentFile(r.url));
+  if (cached) return windowContent(index, r, cached, page, offset);
+  if (r.extraction?.status === "failed") return notRead(index, r, r.extraction.reason, r.extraction.detail);
+
+  if (index.usage.fetches >= LIMITS.maxFetchesPerCourse) {
+    return notRead(index, r, "fetch_budget_exhausted", `This course has used its ${LIMITS.maxFetchesPerCourse} network reads. Re-import the course to reset the budget.`);
+  }
+  const limits = r.kind === "pdf" ? LIMITS.pdf : LIMITS.html;
+  const remainingBytes = LIMITS.maxBytesPerCourse - index.usage.bytes;
+  if (remainingBytes <= 0) {
+    return notRead(index, r, "byte_budget_exhausted", "This course has used its download budget. Re-import the course to reset it.");
+  }
+
+  const now = new Date().toISOString();
+  index.usage.fetches += 1;
+  let result: ReadResult;
+  try {
+    const fetched = await boundedFetch(r.url, index.scope, {
+      transport: deps.transport,
+      limits: { ...limits, maxBytes: Math.min(limits.maxBytes, remainingBytes) },
+      allowedTypes: ALLOWED_TYPES[r.kind],
+      signal: deps.signal,
+    });
+    index.usage.bytes += fetched.bytes.byteLength;
+    const extraction = await extract(fetched.bytes, fetched.contentType);
+    if (extraction.ok) {
+      const content = extractionToCache(extraction, r.url, fetched.finalUrl, fetched.bytes.byteLength);
+      await writeJson(contentFile(r.url), content);
+      r.extraction = { status: "extracted", reason: "", detail: "", at: now };
+      result = windowContent(index, r, content, page, offset);
+    } else {
+      r.extraction = { status: "failed", reason: extraction.reason, detail: extraction.detail, at: now };
+      result = notRead(index, r, extraction.reason, extraction.detail);
+    }
+  } catch (error) {
+    if (!(error instanceof FetchRejected)) throw error;
+    // Timeouts and network errors may be transient, so they are not cached as failures.
+    const transient = error.reason === "timeout" || error.reason === "network_error";
+    if (!transient) r.extraction = { status: "failed", reason: error.reason, detail: error.message, at: now };
+    result = notRead(index, r, error.reason, error.message);
+  }
+  await writeJson(courseFile(index.courseId), index);
+  return result;
+}
+
+/** Keyword search over one resource's cached text; returns matching pages or offsets. */
+export async function searchResource(
+  input: { courseId: string; resourceId: string; query: string },
+): Promise<Array<{ page?: number; offset?: number; snippet: string }>> {
+  const index = await loadCourse(input.courseId);
+  const r = index.resources.find((res) => res.id === input.resourceId);
+  if (!r) throw new CourseError(`Resource "${input.resourceId}" is not in course "${index.courseId}".`);
+  const cached = await readJson<CachedContent>(contentFile(r.url));
+  if (!cached) throw new CourseError(`Resource ${r.id} has not been read yet. Call read_resource without a query first.`);
+  const needle = input.query.toLowerCase();
+  const hits: Array<{ page?: number; offset?: number; snippet: string }> = [];
+  const snippet = (text: string, at: number) => text.slice(Math.max(0, at - 120), at + needle.length + 120).replace(/\s+/g, " ");
+  if (cached.pages) {
+    for (const p of cached.pages) {
+      const at = p.text.toLowerCase().indexOf(needle);
+      if (at !== -1) hits.push({ page: p.page, snippet: snippet(p.text, at) });
+      if (hits.length >= 10) break;
+    }
+  } else if (cached.text) {
+    const lower = cached.text.toLowerCase();
+    for (let at = lower.indexOf(needle); at !== -1 && hits.length < 10; at = lower.indexOf(needle, at + needle.length)) {
+      hits.push({ offset: Math.max(0, at - 200), snippet: snippet(cached.text, at) });
+    }
+  }
+  return hits;
+}
+
+export async function listCourses(): Promise<Array<{ courseId: string; startUrl: string; pageTitle: string; importedAt: string; approvedScope: string }>> {
+  let files: string[];
+  try {
+    files = await readdir(path.join(dataDir(), "courses"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const courses = [];
+  for (const file of files.filter((f) => f.endsWith(".json")).sort()) {
+    const index = await readJson<CourseIndex>(path.join(dataDir(), "courses", file));
+    if (index) {
+      courses.push({
+        courseId: index.courseId,
+        startUrl: index.startUrl,
+        pageTitle: index.pageTitle,
+        importedAt: index.importedAt,
+        approvedScope: describeScope(index.scope),
+      });
+    }
+  }
+  return courses;
+}

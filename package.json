@@ -12,13 +12,19 @@
     "dev": "eve dev",
     "eval": "eve eval",
     "start": "eve start",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "inspect": "node scripts/inspect-course.ts",
+    "reset-progress": "node scripts/reset-progress.ts"
   },
   "dependencies": {
     "@vercel/connect": "2.5.2",
     "ai": "^7.0.137",
     "eve": "^0.80.1",
+    "guarded-fetch": "0.1.3",
     "just-bash": "^3.6.0",
+    "node-html-parser": "9.0.4",
+    "unpdf": "1.9.0",
     "zod": "4.5.4"
   },
   "devDependencies": {
@@ -27,5 +33,7 @@
   },
   "engines": {
     "node": "24.x"
-  }
+  },
+  "license": "MIT",
+  "description": "A terminal Eve agent that coaches learners from public course websites, with code-enforced source boundaries."
 }

@@ -1,0 +1,92 @@
+// Turns fetched bytes into plain text. HTML keeps block structure as line
+// breaks; PDFs keep one entry per page so citations can name page numbers.
+import { parse } from "node-html-parser";
+import { extractText, getDocumentProxy, getMeta } from "unpdf";
+
+export interface ExtractedPage {
+  page: number;
+  text: string;
+}
+
+export type Extraction =
+  | { ok: true; title: string; kind: "html" | "text"; text: string }
+  | { ok: true; title: string; kind: "pdf"; pages: ExtractedPage[]; totalPages: number }
+  | { ok: false; reason: "no_text" | "parse_failed" | "too_many_pages"; detail: string };
+
+const MAX_PDF_PAGES = 200;
+const MAX_TEXT_CHARS = 400_000;
+
+function tidy(text: string): string {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t\f\v]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+export function extractHtml(html: string): Extraction {
+  const root = parse(html);
+  root.querySelectorAll("script, style, noscript, template, svg, nav").forEach((node) => node.remove());
+  const title = tidy(root.querySelector("title")?.text ?? "") || tidy(root.querySelector("h1")?.text ?? "");
+  const body = root.querySelector("body") ?? root;
+  const text = tidy(body.structuredText).slice(0, MAX_TEXT_CHARS);
+  if (text.length === 0) return { ok: false, reason: "no_text", detail: "The page contains no extractable text." };
+  return { ok: true, title, kind: "html", text };
+}
+
+export function extractPlainText(raw: string): Extraction {
+  const text = tidy(raw).slice(0, MAX_TEXT_CHARS);
+  if (text.length === 0) return { ok: false, reason: "no_text", detail: "The file is empty." };
+  return { ok: true, title: "", kind: "text", text };
+}
+
+export async function extractPdf(bytes: Uint8Array): Promise<Extraction> {
+  if (new TextDecoder().decode(bytes.subarray(0, 1024)).indexOf("%PDF-") === -1) {
+    return { ok: false, reason: "parse_failed", detail: "The response is labeled PDF but has no PDF header." };
+  }
+  let pdf;
+  try {
+    // pdf.js may take ownership of the buffer, so pass a copy.
+    pdf = await getDocumentProxy(new Uint8Array(bytes), { verbosity: 0 });
+  } catch (error) {
+    return { ok: false, reason: "parse_failed", detail: `PDF could not be parsed: ${errorMessage(error)}` };
+  }
+  try {
+    if (pdf.numPages > MAX_PDF_PAGES) {
+      return { ok: false, reason: "too_many_pages", detail: `PDF has ${pdf.numPages} pages; limit is ${MAX_PDF_PAGES}.` };
+    }
+    const { totalPages, text } = await extractText(pdf, { mergePages: false });
+    let chars = 0;
+    const pages: ExtractedPage[] = [];
+    text.forEach((pageText, index) => {
+      const cleaned = tidy(pageText);
+      chars += cleaned.length;
+      if (chars <= MAX_TEXT_CHARS) pages.push({ page: index + 1, text: cleaned });
+    });
+    if (pages.every((p) => p.text.length === 0)) {
+      return {
+        ok: false,
+        reason: "no_text",
+        detail: "No text layer found (the PDF may be scanned images). Its contents were not read.",
+      };
+    }
+    let title = "";
+    try {
+      const meta = await getMeta(pdf);
+      const info = meta.info as { Title?: unknown } | undefined;
+      title = typeof info?.Title === "string" ? tidy(info.Title) : "";
+    } catch {
+      // Metadata is optional.
+    }
+    return { ok: true, title, kind: "pdf", pages, totalPages };
+  } catch (error) {
+    return { ok: false, reason: "parse_failed", detail: `PDF text extraction failed: ${errorMessage(error)}` };
+  } finally {
+    await pdf.loadingTask.destroy().catch(() => {});
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

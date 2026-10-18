@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test, before } from "node:test";
-import { importCourse, readResource, loadCourse, listCourses, CourseError, EMPTY_PAGE, type CourseIndex } from "../agent/lib/course.ts";
+import { importCourse, importResult, readResource, loadCourse, listCourses, CourseError, EMPTY_PAGE, type CourseIndex } from "../agent/lib/course.ts";
 import { mockTransport, toyCourseRoutes, useTempDataDir, START_URL } from "./helpers.ts";
 
 useTempDataDir();
@@ -25,6 +25,13 @@ describe("course import and reading (mocked HTTP)", () => {
     assert.equal(index.courseId, "toy-course-example-toy101");
     assert.equal(index.resources[0]?.id, "r1");
     assert.equal(index.resources[0]?.extraction?.status, "extracted");
+  });
+
+  test("the import result does not claim any resource was read", () => {
+    const result = importResult(index);
+    assert.doesNotMatch(result.note, /has been read/);
+    assert.match(result.note, /Call read_resource before relying on or citing any resource, including r1/);
+    assert.ok(result.readableResources.some((r) => r.id === "r1"));
   });
 
   test("the index is persisted and listed", async () => {

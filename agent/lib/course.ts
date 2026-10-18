@@ -186,6 +186,23 @@ export function summarizeIndex(index: CourseIndex) {
   };
 }
 
+/** What import_course returns to the model: the summary, readable resources, and an honest note. */
+export function importResult(index: CourseIndex) {
+  const start = index.resources[0];
+  const startFailed =
+    start?.extraction?.status === "failed" ? ` The start page's text could not be extracted (${start.extraction.reason}).` : "";
+  return {
+    ...summarizeIndex(index),
+    readableResources: index.resources
+      .filter((r) => r.status === "readable")
+      .slice(0, 40)
+      .map(({ id, title, kind, section }) => ({ id, title, kind, section })),
+    note:
+      "No resource text has been returned to you yet. Call read_resource before relying on or citing any resource, including r1 (the start page)." +
+      startFailed,
+  };
+}
+
 export type ReadResult =
   | {
       read: true;

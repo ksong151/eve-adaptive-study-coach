@@ -1,6 +1,6 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { CourseError, importCourse, summarizeIndex } from "../lib/course.ts";
+import { CourseError, importCourse, importResult } from "../lib/course.ts";
 import { guardedTransport } from "../lib/fetcher.ts";
 import { learnerSupplied, learnerText } from "../lib/learner-input.ts";
 import { checkPublicHttpsUrl } from "../lib/scope.ts";
@@ -34,13 +34,6 @@ export default defineTool({
       { startUrl: start!, additionalScopes: scopes },
       { transport: guardedTransport, signal: ctx.abortSignal },
     );
-    return {
-      ...summarizeIndex(index),
-      readableResources: index.resources
-        .filter((r) => r.status === "readable")
-        .slice(0, 40)
-        .map(({ id, title, kind, section }) => ({ id, title, kind, section })),
-      note: "Only r1 (the start page) has been read so far. Other resources are unread until read_resource succeeds.",
-    };
+    return importResult(index);
   },
 });

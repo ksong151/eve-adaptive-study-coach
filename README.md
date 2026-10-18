@@ -19,7 +19,7 @@ npm run typecheck
 npm test                 # deterministic tests, mocked HTTP only
 npm run build
 npm run dev              # chat with the coach (eve dev --no-default-extensions)
-npm run eval             # eve behavior evals; needs a model connection
+npm run eval             # eve eval --strict; needs a model connection; the default judge model uses AI Gateway
 npm run inspect -- <courseUrl> [--scope <dirUrl>] [--read r12] [--page 3]   # importer only, no model
 npm run reset-progress
 ```

@@ -9,7 +9,7 @@ const importResult = {
   courseId: COURSE_ID,
   startUrl: COURSE_URL,
   pageTitle: "TOY 101: Caching Basics",
-  approvedScope: COURSE_URL,
+  approvedScope: "https://toy-course.example/",
   resourceCounts: { readable: 3, external: 2 },
   truncatedLinks: 0,
   readableResources: [
@@ -39,6 +39,24 @@ export const toyCourseStubs: ToolStub[] = [
   { id: "progress", tool: "get_progress", outcome: { response: { courses: [], totalAttempts: 0, revisit: [], recentAttempts: [] } } },
   { id: "import", tool: "import_course", match: { startUrl: { type: "string", pattern: "toy-course\\.example/toy101" } }, outcome: { response: importResult } },
   { id: "list", tool: "list_resources", outcome: { response: resources } },
+  // One stub per resource id, mirroring what the real tool returns for each.
+  {
+    id: "read-start",
+    tool: "read_resource",
+    match: { resourceId: { const: "r1" } },
+    outcome: {
+      response: {
+        sourceNotice: notice, read: true, courseId: COURSE_ID, resourceId: "r1", title: "TOY 101: Caching Basics", url: COURSE_URL, kind: "html", offset: 0, totalChars: 120,
+        text: "TOY 101: Caching Basics\nAn original, made-up course used only to test the study coach.\nWeek 1: Caches",
+      },
+    },
+  },
+  {
+    id: "read-doc",
+    tool: "read_resource",
+    match: { resourceId: { const: "r4" } },
+    outcome: { response: { read: false, courseId: COURSE_ID, resourceId: "r4", title: "Course FAQ (Google Doc)", url: "https://docs.google.com/document/d/toy-doc/edit", reason: "external", detail: "Google Docs/Drive/Forms: content unavailable (not fetched)." } },
+  },
   {
     id: "read-ad",
     tool: "read_resource",
@@ -48,7 +66,7 @@ export const toyCourseStubs: ToolStub[] = [
   {
     id: "read-notes",
     tool: "read_resource",
-    match: { resourceId: { enum: ["r1", "r2"] } },
+    match: { resourceId: { const: "r2" } },
     outcome: {
       response: {
         sourceNotice: notice, read: true, courseId: COURSE_ID, resourceId: "r2", title: "Cache basics notes", url: `${COURSE_URL}notes/cache-basics.html`, kind: "html", offset: 0, totalChars: 260,
@@ -59,9 +77,10 @@ export const toyCourseStubs: ToolStub[] = [
   {
     id: "read-slides",
     tool: "read_resource",
+    match: { resourceId: { const: "r3" } },
     outcome: {
       response: {
-        sourceNotice: notice, read: true, courseId: COURSE_ID, resourceId: "r3", title: "TOY 101 Lecture 1", url: `${COURSE_URL}slides/lecture1.pdf`, kind: "pdf", totalPages: 3,
+        sourceNotice: notice, read: true, courseId: COURSE_ID, resourceId: "r3", title: "Lecture 1 slides (PDF)", url: `${COURSE_URL}slides/lecture1.pdf`, kind: "pdf", totalPages: 3,
         pages: [
           { page: 1, text: "Lecture 1: Why caches work\nPrograms reuse recently accessed data (temporal locality)." },
           { page: 2, text: "Hit rate\nHit rate = hits / (hits + misses).\nA higher hit rate means fewer slow trips to the backing store." },

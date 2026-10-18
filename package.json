@@ -10,7 +10,7 @@
     "build": "eve build",
     "deploy": "eve deploy",
     "dev": "eve dev --no-default-extensions",
-    "eval": "eve eval",
+    "eval": "eve eval --strict",
     "start": "eve start",
     "typecheck": "tsc",
     "test": "node --test \"test/**/*.test.ts\"",

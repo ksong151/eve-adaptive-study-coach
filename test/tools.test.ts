@@ -1,6 +1,7 @@
 // Tool-layer guards: what the model can pass, and what it cannot.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { ModelMessage } from "ai";
 import importCourseTool from "../agent/tools/import_course.ts";
@@ -153,6 +154,15 @@ describe("read_resource and record_attempt tools", () => {
     assert.ok(!schema.safeParse({ ...input, url: "https://evil.example/" }).success);
     await recordAttemptTool.execute(input as never, { ...ctx([]), callId: "call-xyz" } as never);
     assert.ok((await loadProgress()).attempts.some((a) => a.id === "call-xyz"));
+  });
+});
+
+describe("repository hygiene", () => {
+  test("local study data is excluded from git and from deploys", () => {
+    for (const file of [".gitignore", ".vercelignore"]) {
+      const lines = readFileSync(new URL(`../${file}`, import.meta.url), "utf8").split("\n").map((l) => l.trim());
+      assert.ok(lines.includes(".study-coach"), `${file} lists .study-coach`);
+    }
   });
 });
 

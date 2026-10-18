@@ -5,3 +5,5 @@ node_modules
 .output
 .nitro
 dist
+# Local study data: progress, course indexes, fetched course text
+.study-coach

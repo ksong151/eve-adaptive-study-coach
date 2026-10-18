@@ -2,7 +2,7 @@
 // small course from mocked routes.
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { importCourse, readResource, LIMITS, type CourseIndex } from "../agent/lib/course.ts";
+import { importCourse, readResource, listCourses, loadCourse, LIMITS, type CourseIndex } from "../agent/lib/course.ts";
 import { html, makePdf, mockTransport, pdf, redirect, useTempDataDir, START_URL, FIXTURE_ORIGIN, type Route } from "./helpers.ts";
 
 // Cached text is shared by URL, so each test gets an empty data directory.
@@ -10,10 +10,11 @@ beforeEach(() => {
   useTempDataDir();
 });
 
-const original = { fetches: LIMITS.maxFetchesPerCourse, bytes: LIMITS.maxBytesPerCourse };
+const original = { fetches: LIMITS.maxFetchesPerCourse, bytes: LIMITS.maxBytesPerCourse, chars: LIMITS.maxCharsPerRead };
 afterEach(() => {
   LIMITS.maxFetchesPerCourse = original.fetches;
   LIMITS.maxBytesPerCourse = original.bytes;
+  LIMITS.maxCharsPerRead = original.chars;
 });
 
 async function course(startHtml: string, routes: Record<string, Route> = {}) {
@@ -90,5 +91,64 @@ describe("same-site boundary", () => {
     const result = await read(index, id("moved.html"), mock.transport);
     assert.equal(!result.read && result.reason, "redirect_rejected");
     assert.ok(!mock.requests.includes(target));
+  });
+});
+
+describe("failures, retries, and re-import", () => {
+  test("a network error is not recorded, so the next read retries and succeeds", async () => {
+    let calls = 0;
+    const { index, mock, id } = await course(`<a href="a.pdf">Alpha</a>`, {
+      [`${START_URL}a.pdf`]: () => {
+        calls++;
+        if (calls === 1) throw new Error("connection reset");
+        return pdf(makePdf([["page a"]]))();
+      },
+    });
+    const first = await read(index, id("a.pdf"), mock.transport);
+    assert.equal(!first.read && first.reason, "network_error");
+    const second = await read(await loadCourse(index.courseId), id("a.pdf"), mock.transport);
+    assert.equal(second.read, true);
+  });
+
+  test("an HTTP 404 is recorded and not fetched again", async () => {
+    const { index, mock, id } = await course(`<a href="gone.pdf">Gone</a>`, {
+      [`${START_URL}gone.pdf`]: () => new Response("missing", { status: 404 }),
+    });
+    const first = await read(index, id("gone.pdf"), mock.transport);
+    assert.equal(!first.read && first.reason, "http_error");
+    const count = mock.requests.length;
+    const again = await read(await loadCourse(index.courseId), id("gone.pdf"), mock.transport);
+    assert.equal(!again.read && again.reason, "http_error");
+    assert.equal(mock.requests.length, count);
+  });
+
+  test("PDF reads stop at the character cap and continue with nextPage", async () => {
+    const { index, mock, id } = await course(`<a href="a.pdf">Alpha</a>`, {
+      [`${START_URL}a.pdf`]: pdf(makePdf([["first page text"], ["second page text"], ["third page text"]])),
+    });
+    LIMITS.maxCharsPerRead = 35; // fits two short pages, not three
+    const first = await read(index, id("a.pdf"), mock.transport);
+    assert.ok(first.read);
+    assert.deepEqual(first.pages?.map((p) => p.page), [1, 2]);
+    assert.equal(first.nextPage, 3);
+    const rest = await readResource({ courseId: index.courseId, resourceId: id("a.pdf"), page: 3 }, { transport: mock.transport });
+    assert.ok(rest.read);
+    assert.deepEqual(rest.pages?.map((p) => p.page), [3]);
+    assert.equal(rest.nextPage, undefined);
+  });
+
+  test("successful reads add to the byte budget, and re-import resets it", async () => {
+    const { index, mock, id } = await course(`<a href="a.pdf">Alpha</a>`, { [`${START_URL}a.pdf`]: pdf(makePdf([["page a"]])) });
+    const before = index.usage.bytes;
+    await read(index, id("a.pdf"), mock.transport);
+    const after = await loadCourse(index.courseId);
+    assert.equal(after.usage.fetches, 2);
+    assert.ok(after.usage.bytes > before);
+    const again = await importCourse({ startUrl: START_URL, additionalScopes: [] }, { transport: mock.transport });
+    assert.equal(again.usage.fetches, 1);
+  });
+
+  test("listCourses is empty before anything is imported", async () => {
+    assert.deepEqual(await listCourses(), []);
   });
 });

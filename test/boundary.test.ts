@@ -38,6 +38,10 @@ describe("URL policy", () => {
     ["https://192.168.0.1/", "private_or_local_host"],
     ["https://[::1]/", "private_or_local_host"],
     ["https://[::ffff:127.0.0.1]/", "private_or_local_host"],
+    ["https://[::ffff:7f00:1]/", "private_or_local_host"],
+    ["https://0x7f.1/", "private_or_local_host"],
+    ["https://100.64.0.1/", "private_or_local_host"],
+    ["https://[fe80::1]/", "private_or_local_host"],
     ["https://localhost/toy101/", "private_or_local_host"],
     ["https://printer.local/", "private_or_local_host"],
     ["https://intranet/", "private_or_local_host"],
@@ -193,5 +197,35 @@ describe("bounded fetcher (mocked HTTP)", () => {
     }).catch((e: unknown) => e);
     assert.ok(error instanceof FetchRejected);
     assert.equal(error.reason, "timeout");
+  });
+
+  test("protocol-relative redirect to another host is rejected before it is requested", async () => {
+    const start = `${START_URL}a.html`;
+    const { error, requests } = await rejects(start, { [start]: redirect("//evil.example/steal") });
+    assert.equal(error.reason, "redirect_rejected");
+    assert.deepEqual(requests, [start]);
+  });
+
+  test("a redirect into an approved other-site directory is followed", async () => {
+    const built = buildScope(new URL(START_URL), ["https://files.example-cdn.test/toy101/"]);
+    assert.ok("scope" in built);
+    const start = `${START_URL}a.pdf`;
+    const target = "https://files.example-cdn.test/toy101/a.pdf";
+    const mock = mockTransport({
+      [start]: redirect(target),
+      [target]: () => new Response("%PDF-1.4", { status: 200, headers: { "content-type": "application/pdf" } }),
+    });
+    const doc = await boundedFetch(start, built.scope, { transport: mock.transport, limits: htmlLimits, allowedTypes: ["application/pdf"] });
+    assert.equal(doc.finalUrl, target);
+    assert.deepEqual(mock.requests, [start, target]);
+  });
+
+  test("XHTML is accepted as HTML", async () => {
+    const start = `${START_URL}a.xhtml`;
+    const mock = mockTransport({
+      [start]: () => new Response("<p>x</p>", { status: 200, headers: { "content-type": "application/xhtml+xml; charset=utf-8" } }),
+    });
+    const doc = await boundedFetch(start, scope, { transport: mock.transport, limits: htmlLimits, allowedTypes: ["text/html"] });
+    assert.equal(doc.contentType, "text/html");
   });
 });

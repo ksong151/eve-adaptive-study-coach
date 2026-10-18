@@ -7,6 +7,8 @@ import importCourseTool from "../agent/tools/import_course.ts";
 import readResourceTool from "../agent/tools/read_resource.ts";
 import listResourcesTool from "../agent/tools/list_resources.ts";
 import getProgressTool from "../agent/tools/get_progress.ts";
+import recordAttemptTool from "../agent/tools/record_attempt.ts";
+import { loadProgress } from "../agent/lib/progress.ts";
 import { importCourse } from "../agent/lib/course.ts";
 import { learnerSupplied, learnerText } from "../agent/lib/learner-input.ts";
 import { mockTransport, toyCourseRoutes, useTempDataDir, START_URL } from "./helpers.ts";
@@ -26,6 +28,20 @@ describe("learner-supplied URL check", () => {
   test("rejects a different host that merely contains the text", () => {
     assert.ok(!learnerSupplied(new URL("https://example.test/course/"), "see notcs-example.test/course/ and evil-example.test/course"));
   });
+  test("accepts a URL with a query string or followed by punctuation or quotes", () => {
+    assert.ok(learnerSupplied(new URL("https://site.test/c/?term=fall"), "use https://site.test/c/?term=fall please"));
+    assert.ok(learnerSupplied(new URL("https://site.test/c/"), "My course is https://site.test/c/."));
+    assert.ok(learnerSupplied(new URL("https://site.test/c/"), "(see https://site.test/c/)"));
+    assert.ok(learnerSupplied(new URL("https://site.test/c/"), `"https://site.test/c/"`));
+  });
+
+  test("reads text parts from array content and ignores other parts", () => {
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "course: https://site.test/c/" }, { type: "image", image: "aGVsbG8=" }] },
+    ] as ModelMessage[];
+    assert.equal(learnerText(messages), "course: https://site.test/c/");
+  });
+
   test("ignores URLs that appear only in tool results", () => {
     const messages = [
       { role: "user", content: "Help me study caching." },
@@ -107,6 +123,36 @@ describe("list_resources and get_progress tools", () => {
     assert.deepEqual(progress.courses.map((c) => c.courseId), [index.courseId]);
     assert.equal(progress.totalAttempts, 0);
     assert.deepEqual(mock.requests, [START_URL], "listing and progress make no requests");
+  });
+});
+
+describe("read_resource and record_attempt tools", () => {
+  test("read_resource labels returned text as untrusted course material", async () => {
+    const mock = mockTransport(toyCourseRoutes());
+    const index = await importCourse({ startUrl: START_URL, additionalScopes: [] }, { transport: mock.transport });
+    // r1 (the start page) is cached by the import, so this tool call makes no request.
+    const out = (await readResourceTool.execute({ courseId: index.courseId, resourceId: "r1" }, ctx([]))) as { read: boolean; sourceNotice?: string };
+    assert.equal(out.read, true);
+    assert.match(out.sourceNotice ?? "", /untrusted course material/);
+  });
+
+  test("record_attempt saves under the tool call id and its schema rejects unknown keys", async () => {
+    const mock = mockTransport(toyCourseRoutes());
+    const index = await importCourse({ startUrl: START_URL, additionalScopes: [] }, { transport: mock.transport });
+    const input = {
+      courseId: index.courseId,
+      concept: "Caches",
+      question: "What is a cache hit?",
+      learnerAnswer: "Data found in the cache.",
+      observation: "demonstrated",
+      feedbackSummary: "Correct.",
+      sources: [{ resourceId: "r1" }],
+    };
+    const schema = recordAttemptTool.inputSchema as unknown as { safeParse(v: unknown): { success: boolean } };
+    assert.ok(schema.safeParse(input).success);
+    assert.ok(!schema.safeParse({ ...input, url: "https://evil.example/" }).success);
+    await recordAttemptTool.execute(input as never, { ...ctx([]), callId: "call-xyz" } as never);
+    assert.ok((await loadProgress()).attempts.some((a) => a.id === "call-xyz"));
   });
 });
 

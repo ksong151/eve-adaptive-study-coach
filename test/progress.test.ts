@@ -3,7 +3,7 @@ import { describe, test, before } from "node:test";
 import { importCourse, readResource, type CourseIndex } from "../agent/lib/course.ts";
 import { loadProgress, progressSummary, recordAttempt } from "../agent/lib/progress.ts";
 import { resetProgress } from "../agent/lib/store.ts";
-import { mockTransport, toyCourseRoutes, useTempDataDir, START_URL } from "./helpers.ts";
+import { html, mockTransport, toyCourseRoutes, useTempDataDir, START_URL, FIXTURE_ORIGIN } from "./helpers.ts";
 
 useTempDataDir();
 
@@ -90,5 +90,60 @@ describe("progress persistence", () => {
     assert.equal((await loadProgress()).attempts.length, 2);
     await resetProgress();
     assert.equal((await loadProgress()).attempts.length, 0);
+  });
+});
+
+describe("progress details", () => {
+  let index: CourseIndex;
+  let notesId: string;
+  const attempt = (id: string, extra: Record<string, unknown>) => ({
+    attemptId: id,
+    courseId: index.courseId,
+    concept: "Cache hits",
+    question: "What is a cache hit?",
+    learnerAnswer: "answer",
+    observation: "needs_review" as const,
+    feedbackSummary: "feedback",
+    sources: [{ resourceId: "r1" }],
+    ...extra,
+  });
+
+  before(async () => {
+    await resetProgress();
+    const mock = mockTransport(toyCourseRoutes());
+    index = await importCourse({ startUrl: START_URL, additionalScopes: [] }, { transport: mock.transport });
+    notesId = index.resources.find((r) => r.url.endsWith("notes/cache-basics.html"))!.id;
+    await readResource({ courseId: index.courseId, resourceId: notesId }, { transport: mock.transport });
+  });
+
+  test("the start page can be cited, since the import extracted it", async () => {
+    const saved = await recordAttempt(attempt("d-1", {}));
+    assert.equal(saved.sources[0]?.resourceId, "r1");
+  });
+
+  test("page numbers on an HTML resource are rejected", async () => {
+    await assert.rejects(recordAttempt(attempt("d-2", { sources: [{ resourceId: notesId, pages: [1] }] })), /no extracted page/);
+  });
+
+  test("a replayed call id returns the original record unchanged", async () => {
+    const replay = await recordAttempt(attempt("d-1", { observation: "demonstrated", concept: "Something else" }));
+    assert.equal(replay.observation, "needs_review");
+    assert.equal(replay.concept, "Cache hits");
+  });
+
+  test("concepts that differ only in case are merged", async () => {
+    await recordAttempt(attempt("d-3", { concept: "CACHE HITS", observation: "demonstrated" }));
+    const summary = await progressSummary(index.courseId);
+    assert.deepEqual(summary.revisit, []);
+  });
+
+  test("the summary can be filtered to one course", async () => {
+    const otherStart = `${FIXTURE_ORIGIN}/toy102/`;
+    const mock = mockTransport({ [otherStart]: html("<title>TOY 102</title><p>Other course</p>") });
+    const other = await importCourse({ startUrl: otherStart, additionalScopes: [] }, { transport: mock.transport });
+    await recordAttempt({ ...attempt("d-4", {}), courseId: other.courseId, concept: "Other topic" });
+    assert.deepEqual((await progressSummary(other.courseId)).revisit.map((r) => r.concept), ["Other topic"]);
+    assert.ok(!(await progressSummary(index.courseId)).revisit.some((r) => r.concept === "Other topic"));
+    assert.equal((await progressSummary()).totalAttempts, 3);
   });
 });

@@ -97,7 +97,8 @@ export function checkFetchAllowed(raw: string, scope: CourseScope): UrlDecision 
  * approved. The start page contributes its whole site (origin): only links
  * found on that page are ever indexed, so this widens which of those links
  * can be read, not what can be discovered. Additional prefixes, for other
- * sites, must be valid public https URLs and must not be a site root.
+ * sites, must be public https directory URLs (ending in "/") and must not be
+ * a site root, so naming one file never approves the folder around it.
  */
 export function buildScope(
   startUrl: URL,
@@ -107,6 +108,9 @@ export function buildScope(
   for (const raw of additionalPrefixes) {
     const decision = checkPublicHttpsUrl(raw);
     if (!decision.allowed) return { error: `Additional scope ${raw} rejected: ${decision.detail}` };
+    if (!decision.url.pathname.endsWith("/") || decision.url.search !== "") {
+      return { error: `Additional scope ${raw} is not a directory URL. Approve a directory URL ending in "/".` };
+    }
     const prefix = directoryPrefix(decision.url);
     if (prefix === "/") {
       return { error: `Additional scope ${raw} is a site root. Approve a specific directory instead.` };

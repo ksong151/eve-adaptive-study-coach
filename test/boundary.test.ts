@@ -68,6 +68,14 @@ describe("URL policy", () => {
     assert.match(result.error, /site root/);
   });
 
+  test("additional scopes must be directory URLs, so naming one file does not approve its folder", () => {
+    const file = buildScope(new URL(START_URL), ["https://files.example-cdn.test/toy101/lecture1.pdf"]);
+    assert.ok("error" in file);
+    assert.match(file.error, /not a directory URL/);
+    assert.ok("error" in buildScope(new URL(START_URL), ["https://files.example-cdn.test/toy101/?page=2"]));
+    assert.ok("scope" in buildScope(new URL(START_URL), ["https://files.example-cdn.test/toy101/"]));
+  });
+
   test("additional scopes must themselves be public https URLs", () => {
     assert.ok("error" in buildScope(new URL(START_URL), ["https://127.0.0.1/files/"]));
     assert.ok("error" in buildScope(new URL(START_URL), ["http://toy-course.example/files/"]));

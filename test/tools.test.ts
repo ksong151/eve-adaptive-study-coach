@@ -78,6 +78,16 @@ describe("import_course tool", () => {
     );
   });
 
+  test("rejects a file URL as an extra scope, even when the learner wrote it", async () => {
+    await assert.rejects(
+      Promise.resolve(importCourseTool.execute(
+        { startUrl: "https://cs-example.test/w/", additionalScopes: ["https://cdn.example.test/files/lecture1.pdf"] },
+        ctx([{ role: "user", content: "Course https://cs-example.test/w/ — is https://cdn.example.test/files/lecture1.pdf right?" }]),
+      )),
+      /not a directory URL/,
+    );
+  });
+
   test("rejects a learner-supplied private URL before any request", async () => {
     await assert.rejects(
       Promise.resolve(importCourseTool.execute(

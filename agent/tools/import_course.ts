@@ -16,7 +16,7 @@ export default defineTool({
       .array(z.string().min(1).max(500))
       .max(3)
       .default([])
-      .describe("Directory URLs on other sites that the learner explicitly approved."),
+      .describe("Directory URLs (ending in /) on other sites that the learner explicitly approved."),
   }),
   async execute({ startUrl, additionalScopes }, ctx) {
     const text = learnerText(ctx.messages);

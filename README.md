@@ -39,7 +39,7 @@ Example prompt in `npm run dev`: *"My course is https://cs144.github.io/. Quiz m
 1. **No general tools.** `defaultTools: false` removes eve's shell, file, web fetch, web search, and agent tools. A test asserts that `eve info` lists only the five course tools. `eve dev` would also mount a self-modification subagent that edits files under `agent/`; it is turned off with `local: { enabled: false }`, and `npm run dev` passes `--no-default-extensions` to skip eve's other bundled dev extensions.
 2. **Learner-supplied start page.** `import_course` rejects a URL or extra scope that does not appear in the learner's own messages. Page text arrives in tool results, so it cannot supply URLs.
 3. **One page, no crawling.** Import fetches only the start page and indexes its `<a href>` links. URLs in page text and HTML comments are ignored.
-4. **Course site only.** Links on the start page's own site (exact host) are readable, wherever they sit on that site. Other sites, including other subdomains, are listed only; reading one requires the learner to approve a specific directory URL on it, which cannot be a site root.
+4. **Course site only.** Links on the start page's own site (exact host) are readable, wherever they sit on that site. Other sites, including other subdomains, are listed only; reading one requires the learner to approve a specific directory URL on it, ending in `/` and not a site root, so naming one file never approves its folder.
 5. **Read by id only.** `read_resource` takes a resource id like `r31`, never a URL. External, blocked, and unsupported links are listed with their original URL and never requested.
 6. **Every request and redirect hop is checked before it is sent:** https, default port, no credentials, public hostname, no private IP literal, in scope, at most 3 redirects. Requests are read-only GETs through Vercel's [`guarded-fetch`](https://github.com/vercel-labs/guarded-fetch), which also checks DNS and pins the connected IP.
 7. **Limits.** HTML 2 MB / 15 s; PDF 15 MB / 30 s / 200 pages; per import 250 links, 30 network reads, 60 MB; content types `text/html` and `application/pdf` only.
@@ -88,7 +88,7 @@ READ r31 "Slides (week-2-tcp.pdf)" (8 pages)
 - Resource ids follow page order, so re-importing a changed site can renumber them; saved attempts also keep title and URL.
 - Single user, local files. Writes are serialized within one process; two processes sharing one `.study-coach/` folder can still conflict.
 - Question and feedback quality and the observation label depend on the model and are not validated assessments.
-- The learner-URL check needs the URL in the model's context; after compaction the learner may need to paste it again.
+- The learner-URL check needs the URL in the model's context; after compaction the learner may need to paste it again. It proves the learner wrote the URL, not that they meant to approve it.
 
 ## License
 

@@ -1,7 +1,7 @@
 // Study observations, persisted locally across sessions. These are the
 // coach's notes about one answer, not a validated mastery measurement.
-import { readJson, writeJson, progressFile, contentFile, withLock } from "./store.ts";
-import { CourseError, loadCourse, type CachedContent, type CourseIndex } from "./course.ts";
+import { readJson, writeJson, progressFile, withLock } from "./store.ts";
+import { cachedTextFor, CourseError, loadCourse, type CourseIndex } from "./course.ts";
 
 export const OBSERVATIONS = ["demonstrated", "partially_demonstrated", "needs_review", "unclear"] as const;
 export type Observation = (typeof OBSERVATIONS)[number];
@@ -43,7 +43,7 @@ async function resolveSource(
 ): Promise<SourceRef & { contentRead: boolean }> {
   const r = index.resources.find((res) => res.id === ref.resourceId);
   if (!r) throw new CourseError(`Resource "${ref.resourceId}" is not in course "${index.courseId}".`);
-  const cached = r.status === "readable" ? await readJson<CachedContent>(contentFile(r.url)) : undefined;
+  const cached = await cachedTextFor(index, r);
   if (mustBeRead && !cached) {
     throw new CourseError(
       `Resource ${r.id} ("${r.title}") has no extracted text, so it cannot be cited as a source. Read it with read_resource first, or cite a resource that was read.`,

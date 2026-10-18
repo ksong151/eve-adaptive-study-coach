@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { importCourse, readResource, listCourses, loadCourse, LIMITS, type CourseIndex } from "../agent/lib/course.ts";
+import { recordAttempt } from "../agent/lib/progress.ts";
 import { html, makePdf, mockTransport, pdf, redirect, useTempDataDir, START_URL, FIXTURE_ORIGIN, type Route } from "./helpers.ts";
 import { EXTRACT_LIMITS } from "../agent/lib/extract.ts";
 
@@ -244,3 +245,27 @@ describe("budget accounting and retries", () => {
   });
 });
 
+describe("cached text and course ids", () => {
+  test("text cached through another course's approved scope is not reused or citable", async () => {
+    const cdn = "https://cdn.example-files.test/x/";
+    const routes = {
+      [`${FIXTURE_ORIGIN}/a/`]: html(`<a href="/shared/moved.html">Moved notes</a>`),
+      [`${FIXTURE_ORIGIN}/b/`]: html(`<a href="/shared/moved.html">Moved notes</a>`),
+      [`${FIXTURE_ORIGIN}/shared/moved.html`]: redirect(`${cdn}notes.html`),
+      [`${cdn}notes.html`]: html("<p>notes served from the approved cdn directory</p>"),
+    };
+    const mock = mockTransport(routes);
+    const a = await importCourse({ startUrl: `${FIXTURE_ORIGIN}/a/`, additionalScopes: [cdn] }, { transport: mock.transport });
+    const b = await importCourse({ startUrl: `${FIXTURE_ORIGIN}/b/`, additionalScopes: [] }, { transport: mock.transport });
+    const idIn = (index: CourseIndex) => index.resources.find((r) => r.url.endsWith("/shared/moved.html"))!.id;
+
+    assert.equal((await read(a, idIn(a), mock.transport)).read, true, "course A may follow the redirect");
+    const inB = await read(b, idIn(b), mock.transport);
+    assert.equal(!inB.read && inB.reason, "redirect_rejected", "course B ignores A's cached text and rechecks");
+    await assert.rejects(
+      recordAttempt({ attemptId: "c-1", courseId: b.courseId, concept: "c", question: "q", learnerAnswer: "a", observation: "unclear", feedbackSummary: "f", sources: [{ resourceId: idIn(b) }] }),
+      /cannot be cited/,
+    );
+  });
+
+});

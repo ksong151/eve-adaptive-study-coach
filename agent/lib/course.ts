@@ -3,7 +3,7 @@
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { readJson, writeJson, courseFile, contentFile, coursesLock, dataDir, withLock } from "./store.ts";
-import { buildScope, checkPublicHttpsUrl, describeScope, directoryPrefix, type CourseScope } from "./scope.ts";
+import { buildScope, checkFetchAllowed, checkPublicHttpsUrl, describeScope, directoryPrefix, type CourseScope } from "./scope.ts";
 import { boundedFetch, FetchRejected, type FetchLimits, type SupportedContentType, type Transport } from "./fetcher.ts";
 import { discoverLinks, type ResourceKind, type ResourceStatus } from "./links.ts";
 import { extractHtml, extractPdf, type Extraction, type ExtractedPage } from "./extract.ts";
@@ -90,6 +90,17 @@ export async function loadCourse(courseId: string): Promise<CourseIndex> {
   const index = await readJson<CourseIndex>(courseFile(courseId));
   if (!index) throw new CourseError(`No imported course with id "${courseId}". Import it first with import_course.`);
   return index;
+}
+
+/**
+ * The cached text for a resource, if this course may use it. Text is cached by
+ * URL for every course, so text one course fetched through a redirect into its
+ * own approved scope is ignored by a course whose scope does not allow it.
+ */
+export async function cachedTextFor(index: CourseIndex, r: Resource): Promise<CachedContent | undefined> {
+  if (r.status !== "readable") return undefined;
+  const cached = await readJson<CachedContent>(contentFile(r.url));
+  return cached && checkFetchAllowed(cached.finalUrl, index.scope).allowed ? cached : undefined;
 }
 
 const ALLOWED_TYPES: Record<Exclude<ResourceKind, "other">, SupportedContentType[]> = {
@@ -304,7 +315,7 @@ async function readResourceUnlocked(
     return notRead(index, r, r.status, r.note || "This resource is listed only; its contents were not fetched.");
   }
 
-  const cached = await readJson<CachedContent>(contentFile(r.url));
+  const cached = await cachedTextFor(index, r);
   if (cached) return windowContent(index, r, cached, page, offset);
   if (r.extraction?.status === "failed") return notRead(index, r, r.extraction.reason, r.extraction.detail);
 

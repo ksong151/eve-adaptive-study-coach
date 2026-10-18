@@ -19,7 +19,6 @@ export default defineTool({
       .min(1)
       .max(5),
     recommendedResourceId: z.string().regex(/^r\d{1,4}$/).optional().describe("Indexed resource the learner should revisit."),
-    revisit: z.boolean().optional().describe("Defaults to true unless the observation is demonstrated."),
   }),
   async execute(input, ctx) {
     const attempt = await recordAttempt({ attemptId: ctx.callId, ...input });

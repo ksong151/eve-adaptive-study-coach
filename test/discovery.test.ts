@@ -17,7 +17,7 @@ describe("link discovery", () => {
 
   test("uses list-item context and heading for generic anchor text", () => {
     const slides = byUrl.get(`${START_URL}slides/lecture1.pdf`);
-    assert.equal(slides?.title, "Lecture 1 slides (PDF)");
+    assert.equal(slides?.title, "PDF (lecture1.pdf)");
     assert.equal(slides?.section, "TOY 101: Caching Basics › Week 1: Caches");
     assert.equal(slides?.kind, "pdf");
     assert.equal(slides?.status, "readable");
@@ -43,11 +43,14 @@ describe("link discovery", () => {
     assert.equal(urls.filter((u) => u === `${START_URL}notes/cache-basics.html`).length, 1, "fragment duplicate is merged");
   });
 
-  test("div-based layouts take the label from the cell, not sibling links", () => {
-    const page = `<div class="row"><div class="col">Reliability from unreliability <a href="r.pdf"><img src="i.png"> Slides</a> <a href="https://docs.google.com/x">Lecture notes</a></div></div>`;
-    const [slides, notes] = discoverLinks(page, START_URL, scope, 10).links;
-    assert.equal(slides?.title, "Reliability from unreliability (Slides)");
-    assert.equal(notes?.title, "Reliability from unreliability (Lecture notes)");
+  test("generic link text gets the file name so identical labels stay distinct", () => {
+    const page = `<a href="week-1.pdf">Slides</a> <a href="week-2.pdf">Slides</a> <a href="notes/">Notes</a> <a href="intro.pdf">Course intro</a>`;
+    assert.deepEqual(discoverLinks(page, START_URL, scope, 10).links.map((l) => l.title), [
+      "Slides (week-1.pdf)",
+      "Slides (week-2.pdf)",
+      "Notes",
+      "Course intro",
+    ]);
   });
 
   test("links inside HTML comments are not indexed", () => {
@@ -66,7 +69,7 @@ describe("link discovery", () => {
     assert.equal(kindFromPath("/a/lab_faq.html"), "html");
     assert.equal(kindFromPath("/a/syllabus"), "html");
     assert.equal(kindFromPath("/a/check0.PDF"), "pdf");
-    assert.equal(kindFromPath("/a/readme.txt"), "text");
+    assert.equal(kindFromPath("/a/readme.txt"), "other");
     assert.equal(kindFromPath("/a/notebook.ipynb"), "other");
   });
 });
@@ -86,10 +89,9 @@ describe("extraction", () => {
   });
 
   test("text PDF keeps page numbers", async () => {
-    const result = await extractPdf(makePdf(LECTURE1_PAGES, "TOY 101 Lecture 1"));
+    const result = await extractPdf(makePdf(LECTURE1_PAGES));
     assert.ok(result.ok && result.kind === "pdf");
     assert.equal(result.totalPages, 4);
-    assert.equal(result.title, "TOY 101 Lecture 1");
     assert.deepEqual(result.pages.map((p) => p.page), [1, 2, 3, 4]);
     assert.equal(result.pages[3]!.text, "", "image-only page has no text");
     assert.match(result.pages[1]!.text, /Hit rate = hits \/ \(hits \+ misses\)/);
@@ -100,6 +102,11 @@ describe("extraction", () => {
     const result = await extractPdf(makePdf([[], []]));
     assert.equal(result.ok, false);
     assert.equal(!result.ok && result.reason, "no_text");
+  });
+
+  test("PDF over the page limit is rejected", async () => {
+    const result = await extractPdf(makePdf(Array.from({ length: 201 }, () => [])));
+    assert.equal(!result.ok && result.reason, "too_many_pages");
   });
 
   test("bytes without a PDF header are a parse failure", async () => {

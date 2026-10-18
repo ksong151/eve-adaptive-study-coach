@@ -38,13 +38,8 @@ export function progressFile(): string {
   return path.join(dataDir(), "progress.json");
 }
 
-/** Removes progress only, or progress plus imported course data. */
-export async function resetData(options: { includeCourses: boolean }): Promise<string[]> {
-  const removed: string[] = [];
-  const targets = options.includeCourses ? [dataDir()] : [progressFile()];
-  for (const target of targets) {
-    await rm(target, { recursive: true, force: true });
-    removed.push(target);
-  }
-  return removed;
+/** Deletes saved progress. Course indexes and cached text are kept. */
+export async function resetProgress(): Promise<string> {
+  await rm(progressFile(), { force: true });
+  return progressFile();
 }

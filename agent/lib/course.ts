@@ -6,7 +6,7 @@ import { readJson, writeJson, courseFile, contentFile, dataDir } from "./store.t
 import { buildScope, checkPublicHttpsUrl, describeScope, directoryPrefix, type CourseScope } from "./scope.ts";
 import { boundedFetch, FetchRejected, type FetchLimits, type SupportedContentType, type Transport } from "./fetcher.ts";
 import { discoverLinks, type ResourceKind, type ResourceStatus } from "./links.ts";
-import { extractHtml, extractPdf, extractPlainText, type Extraction, type ExtractedPage } from "./extract.ts";
+import { extractHtml, extractPdf, type Extraction, type ExtractedPage } from "./extract.ts";
 
 export const LIMITS = {
   /** Links kept from the start page. */
@@ -59,7 +59,7 @@ export interface CachedContent {
   url: string;
   finalUrl: string;
   title: string;
-  kind: "html" | "pdf" | "text";
+  kind: "html" | "pdf";
   text?: string;
   pages?: ExtractedPage[];
   totalPages?: number;
@@ -91,22 +91,20 @@ export async function loadCourse(courseId: string): Promise<CourseIndex> {
 }
 
 const ALLOWED_TYPES: Record<Exclude<ResourceKind, "other">, SupportedContentType[]> = {
-  html: ["text/html", "text/plain"],
+  html: ["text/html"],
   pdf: ["application/pdf"],
-  text: ["text/plain"],
 };
 
 function extractionToCache(extraction: Extraction & { ok: true }, url: string, finalUrl: string, bytes: number): CachedContent {
-  const base = { url, finalUrl, title: extraction.title, kind: extraction.kind, bytes, extractedAt: new Date().toISOString() };
+  const base = { url, finalUrl, bytes, extractedAt: new Date().toISOString() };
   return extraction.kind === "pdf"
-    ? { ...base, pages: extraction.pages, totalPages: extraction.totalPages }
-    : { ...base, text: extraction.text };
+    ? { ...base, title: "", kind: "pdf", pages: extraction.pages, totalPages: extraction.totalPages }
+    : { ...base, title: extraction.title, kind: "html", text: extraction.text };
 }
 
 async function extract(bytes: Uint8Array, contentType: SupportedContentType): Promise<Extraction> {
   if (contentType === "application/pdf") return extractPdf(bytes);
-  const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-  return contentType === "text/html" ? extractHtml(text) : extractPlainText(text);
+  return extractHtml(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
 }
 
 /**
@@ -214,12 +212,12 @@ export type ReadResult =
       resourceId: string;
       title: string;
       url: string;
-      kind: "html" | "pdf" | "text";
+      kind: "html" | "pdf";
       /** PDF: the pages returned in this call. */
       pages?: ExtractedPage[];
       totalPages?: number;
       nextPage?: number;
-      /** HTML/text: the slice returned in this call. */
+      /** HTML: the slice returned in this call. */
       text?: string;
       offset?: number;
       nextOffset?: number;
@@ -329,33 +327,6 @@ export async function readResource(
   }
   await writeJson(courseFile(index.courseId), index);
   return result;
-}
-
-/** Keyword search over one resource's cached text; returns matching pages or offsets. */
-export async function searchResource(
-  input: { courseId: string; resourceId: string; query: string },
-): Promise<Array<{ page?: number; offset?: number; snippet: string }>> {
-  const index = await loadCourse(input.courseId);
-  const r = index.resources.find((res) => res.id === input.resourceId);
-  if (!r) throw new CourseError(`Resource "${input.resourceId}" is not in course "${index.courseId}".`);
-  const cached = await readJson<CachedContent>(contentFile(r.url));
-  if (!cached) throw new CourseError(`Resource ${r.id} has not been read yet. Call read_resource without a query first.`);
-  const needle = input.query.toLowerCase();
-  const hits: Array<{ page?: number; offset?: number; snippet: string }> = [];
-  const snippet = (text: string, at: number) => text.slice(Math.max(0, at - 120), at + needle.length + 120).replace(/\s+/g, " ");
-  if (cached.pages) {
-    for (const p of cached.pages) {
-      const at = p.text.toLowerCase().indexOf(needle);
-      if (at !== -1) hits.push({ page: p.page, snippet: snippet(p.text, at) });
-      if (hits.length >= 10) break;
-    }
-  } else if (cached.text) {
-    const lower = cached.text.toLowerCase();
-    for (let at = lower.indexOf(needle); at !== -1 && hits.length < 10; at = lower.indexOf(needle, at + needle.length)) {
-      hits.push({ offset: Math.max(0, at - 200), snippet: snippet(cached.text, at) });
-    }
-  }
-  return hits;
 }
 
 export async function listCourses(): Promise<Array<{ courseId: string; startUrl: string; pageTitle: string; importedAt: string; approvedScope: string }>> {

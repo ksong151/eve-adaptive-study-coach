@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test, before } from "node:test";
-import { importCourse, readResource, searchResource, loadCourse, listCourses, CourseError, EMPTY_PAGE, type CourseIndex } from "../agent/lib/course.ts";
+import { importCourse, readResource, loadCourse, listCourses, CourseError, EMPTY_PAGE, type CourseIndex } from "../agent/lib/course.ts";
 import { mockTransport, toyCourseRoutes, useTempDataDir, START_URL } from "./helpers.ts";
 
 useTempDataDir();
@@ -40,7 +40,7 @@ describe("course import and reading (mocked HTTP)", () => {
     assert.equal(mock.requests.length, before);
   });
 
-  test("reads a PDF with page numbers, then serves it from cache", async () => {
+  test("reads a PDF with page numbers, then pages from cache", async () => {
     const id = idFor(index, "slides/lecture1.pdf");
     const first = await readResource({ courseId: index.courseId, resourceId: id }, { transport: mock.transport });
     assert.ok(first.read && first.kind === "pdf");
@@ -51,8 +51,6 @@ describe("course import and reading (mocked HTTP)", () => {
     assert.ok(fromPage.read);
     assert.deepEqual(fromPage.pages?.map((p) => p.page), [3, 4]);
     assert.equal(mock.requests.length, count, "cached read makes no request");
-    const hits = await searchResource({ courseId: index.courseId, resourceId: id, query: "write-back" });
-    assert.deepEqual(hits.map((h) => h.page), [3]);
   });
 
   test("external ad link: listed, never requested, reported as not read", async () => {

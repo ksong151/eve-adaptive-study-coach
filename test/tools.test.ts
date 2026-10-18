@@ -5,8 +5,11 @@ import { describe, test } from "node:test";
 import type { ModelMessage } from "ai";
 import importCourseTool from "../agent/tools/import_course.ts";
 import readResourceTool from "../agent/tools/read_resource.ts";
+import listResourcesTool from "../agent/tools/list_resources.ts";
+import getProgressTool from "../agent/tools/get_progress.ts";
+import { importCourse } from "../agent/lib/course.ts";
 import { learnerSupplied, learnerText } from "../agent/lib/learner-input.ts";
-import { useTempDataDir } from "./helpers.ts";
+import { mockTransport, toyCourseRoutes, useTempDataDir, START_URL } from "./helpers.ts";
 
 useTempDataDir();
 
@@ -77,6 +80,33 @@ describe("read_resource tool schema", () => {
   test("rejects a URL in place of an id, or as an extra field", () => {
     assert.ok(!schema.safeParse({ courseId: "c", resourceId: "https://evil.example/x" }).success);
     assert.ok(!schema.safeParse({ courseId: "c", resourceId: "r1", url: "https://evil.example/x" }).success);
+  });
+});
+
+describe("list_resources and get_progress tools", () => {
+  test("list by status, page with offset and limit, and report saved courses", async () => {
+    const mock = mockTransport(toyCourseRoutes());
+    const index = await importCourse({ startUrl: START_URL, additionalScopes: [] }, { transport: mock.transport });
+    // execute is typed to allow async iterables; these tools return plain objects.
+    type Listed = { total: number; resources: Array<{ id: string; status: string; url: string }> };
+    const run = async (input: Record<string, unknown>) =>
+      (await listResourcesTool.execute({ courseId: index.courseId, status: "all", offset: 0, limit: 60, ...input } as never, ctx([]))) as Listed;
+
+    const readable = await run({ status: "readable" });
+    assert.ok(readable.resources.length > 0);
+    assert.ok(readable.resources.every((r) => r.status === "readable"));
+    const external = await run({ status: "external" });
+    assert.ok(external.resources.some((r) => r.url.startsWith("https://ads.tracker-example.test/")));
+
+    const all = await run({});
+    const page = await run({ offset: 2, limit: 3 });
+    assert.equal(page.total, all.total);
+    assert.deepEqual(page.resources.map((r) => r.id), all.resources.slice(2, 5).map((r) => r.id));
+
+    const progress = (await getProgressTool.execute({} as never, ctx([]))) as { courses: Array<{ courseId: string }>; totalAttempts: number };
+    assert.deepEqual(progress.courses.map((c) => c.courseId), [index.courseId]);
+    assert.equal(progress.totalAttempts, 0);
+    assert.deepEqual(mock.requests, [START_URL], "listing and progress make no requests");
   });
 });
 

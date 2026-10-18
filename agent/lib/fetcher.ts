@@ -9,7 +9,7 @@
 import { guardedFetch } from "guarded-fetch";
 import { checkFetchAllowed, type CourseScope } from "./scope.ts";
 
-export type SupportedContentType = "text/html" | "application/pdf" | "text/plain";
+export type SupportedContentType = "text/html" | "application/pdf";
 
 export interface FetchLimits {
   maxBytes: number;
@@ -59,7 +59,6 @@ const CONTENT_TYPE_ALIASES: Record<string, SupportedContentType> = {
   "text/html": "text/html",
   "application/xhtml+xml": "text/html",
   "application/pdf": "application/pdf",
-  "text/plain": "text/plain",
 };
 
 const USER_AGENT =
@@ -69,7 +68,7 @@ const USER_AGENT =
 export const guardedTransport: Transport = (url, { signal }) =>
   guardedFetch(url, {
     method: "GET",
-    headers: { accept: "text/html, application/pdf, text/plain;q=0.8", "user-agent": USER_AGENT },
+    headers: { accept: "text/html, application/pdf", "user-agent": USER_AGENT },
     followRedirects: false,
     httpsOnly: true,
     allowedHosts: [url.hostname],

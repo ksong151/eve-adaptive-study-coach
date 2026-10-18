@@ -1,7 +1,7 @@
 // Turns fetched bytes into plain text. HTML keeps block structure as line
 // breaks; PDFs keep one entry per page so citations can name page numbers.
 import { parse } from "node-html-parser";
-import { extractText, getDocumentProxy, getMeta } from "unpdf";
+import { extractText, getDocumentProxy } from "unpdf";
 
 export interface ExtractedPage {
   page: number;
@@ -9,8 +9,8 @@ export interface ExtractedPage {
 }
 
 export type Extraction =
-  | { ok: true; title: string; kind: "html" | "text"; text: string }
-  | { ok: true; title: string; kind: "pdf"; pages: ExtractedPage[]; totalPages: number }
+  | { ok: true; title: string; kind: "html"; text: string }
+  | { ok: true; kind: "pdf"; pages: ExtractedPage[]; totalPages: number }
   | { ok: false; reason: "no_text" | "parse_failed" | "too_many_pages"; detail: string };
 
 const MAX_PDF_PAGES = 200;
@@ -33,12 +33,6 @@ export function extractHtml(html: string): Extraction {
   const text = tidy(body.structuredText).slice(0, MAX_TEXT_CHARS);
   if (text.length === 0) return { ok: false, reason: "no_text", detail: "The page contains no extractable text." };
   return { ok: true, title, kind: "html", text };
-}
-
-export function extractPlainText(raw: string): Extraction {
-  const text = tidy(raw).slice(0, MAX_TEXT_CHARS);
-  if (text.length === 0) return { ok: false, reason: "no_text", detail: "The file is empty." };
-  return { ok: true, title: "", kind: "text", text };
 }
 
 export async function extractPdf(bytes: Uint8Array): Promise<Extraction> {
@@ -71,15 +65,7 @@ export async function extractPdf(bytes: Uint8Array): Promise<Extraction> {
         detail: "No text layer found (the PDF may be scanned images). Its contents were not read.",
       };
     }
-    let title = "";
-    try {
-      const meta = await getMeta(pdf);
-      const info = meta.info as { Title?: unknown } | undefined;
-      title = typeof info?.Title === "string" ? tidy(info.Title) : "";
-    } catch {
-      // Metadata is optional.
-    }
-    return { ok: true, title, kind: "pdf", pages, totalPages };
+    return { ok: true, kind: "pdf", pages, totalPages };
   } catch (error) {
     return { ok: false, reason: "parse_failed", detail: `PDF text extraction failed: ${errorMessage(error)}` };
   } finally {

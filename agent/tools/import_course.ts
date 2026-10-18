@@ -18,7 +18,6 @@ export default defineTool({
       .default([])
       .describe("Extra directory URLs the learner explicitly approved, e.g. a sibling assets directory."),
   }),
-  label: { start: ({ startUrl }) => `Import course page ${startUrl}` },
   async execute({ startUrl, additionalScopes }, ctx) {
     const text = learnerText(ctx.messages);
     const [start, ...scopes] = [startUrl, ...additionalScopes].map((raw) => {

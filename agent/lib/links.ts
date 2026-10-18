@@ -1,10 +1,10 @@
 // Discovers direct links on one course page and classifies each one.
 // Only <a href> attributes are considered; URLs that appear in page text are
 // never added. Nothing here fetches anything.
-import { HTMLElement, parse } from "node-html-parser";
+import { parse, type HTMLElement } from "node-html-parser";
 import { checkPublicHttpsUrl, isInScope, type CourseScope } from "./scope.ts";
 
-export type ResourceKind = "html" | "pdf" | "text" | "other";
+export type ResourceKind = "html" | "pdf" | "other";
 
 export type ResourceStatus =
   /** In scope with a supported format; read_resource may fetch it. */
@@ -28,7 +28,6 @@ export interface DiscoveredLink {
 }
 
 const GENERIC_ANCHOR = /^(\[?\s*((lecture\s+)?(slides?|notes?)|pdf|link|here|zip|colab|video|html|download|handout|code|recording|view|open)\s*\]?|.{0,2})$/i;
-const CONTEXT_BLOCKS = new Set(["LI", "P", "TD", "TH", "DD", "DT", "DIV", "TR", "FIGCAPTION", "CAPTION"]);
 const MAX_TITLE = 160;
 
 /** Labels for common platforms whose content this version cannot read. */
@@ -52,7 +51,6 @@ export function kindFromPath(pathname: string): ResourceKind {
   const ext = last.slice(last.lastIndexOf(".") + 1);
   if (ext === "pdf") return "pdf";
   if (ext === "html" || ext === "htm") return "html";
-  if (ext === "txt") return "text";
   return "other";
 }
 
@@ -63,37 +61,16 @@ function externalNote(host: string): string {
   return "External site: listed only, content not fetched.";
 }
 
-/** Text of `node` excluding text inside links, so sibling link labels do not leak in. */
-function textOutsideLinks(node: HTMLElement): string {
-  let out = "";
-  for (const child of node.childNodes) {
-    if (child instanceof HTMLElement) {
-      if (child.tagName !== "A") out += ` ${textOutsideLinks(child)}`;
-    } else {
-      out += child.text;
-    }
-  }
-  return out;
-}
-
-/** Label from the nearest enclosing block (list item, cell, paragraph, div). */
-function contextLabel(anchor: HTMLElement): string {
-  for (let node = anchor.parentNode, depth = 0; node && node.tagName && depth < 4; node = node.parentNode, depth++) {
-    if (!CONTEXT_BLOCKS.has(node.tagName)) continue;
-    const label = collapse(textOutsideLinks(node))
-      .replace(/[[\](){}]\s*[\])}]/g, "")
-      .replace(/^[\s:|,–—-]+|[\s:|,–—\[(-]+$/g, "");
-    if (label) return label;
-  }
-  return "";
-}
-
-function titleFor(anchor: HTMLElement): string {
+/**
+ * The link text, unless it is generic ("PDF", "Slides"). Then the file name
+ * is added so links in a list of identical labels can still be told apart.
+ */
+function titleFor(anchor: HTMLElement, url: URL): string {
   const anchorText = collapse(anchor.text) || collapse(anchor.getAttribute("title") ?? "");
   if (anchorText && !GENERIC_ANCHOR.test(anchorText)) return truncate(anchorText, MAX_TITLE);
-  const label = contextLabel(anchor);
-  if (label) return truncate(anchorText ? `${label} (${anchorText})` : label, MAX_TITLE);
-  return anchorText || "(untitled link)";
+  const fileName = url.pathname.slice(url.pathname.lastIndexOf("/") + 1);
+  if (!fileName) return anchorText || "(untitled link)";
+  return truncate(anchorText ? `${anchorText} (${fileName})` : fileName, MAX_TITLE);
 }
 
 function classify(url: URL, scope: CourseScope): Pick<DiscoveredLink, "kind" | "status" | "note"> {
@@ -160,7 +137,7 @@ export function discoverLinks(
     }
     links.push({
       url: url.href,
-      title: titleFor(element),
+      title: titleFor(element, url),
       section: headings.filter(Boolean).slice(-2).join(" › "),
       ...classify(url, scope),
     });

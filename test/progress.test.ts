@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test, before } from "node:test";
 import { importCourse, readResource, type CourseIndex } from "../agent/lib/course.ts";
 import { loadProgress, progressSummary, recordAttempt } from "../agent/lib/progress.ts";
-import { resetData } from "../agent/lib/store.ts";
+import { resetProgress } from "../agent/lib/store.ts";
 import { mockTransport, toyCourseRoutes, useTempDataDir, START_URL } from "./helpers.ts";
 
 useTempDataDir();
@@ -88,7 +88,7 @@ describe("progress persistence", () => {
 
   test("progress survives a fresh load from disk and can be reset", async () => {
     assert.equal((await loadProgress()).attempts.length, 2);
-    await resetData({ includeCourses: false });
+    await resetProgress();
     assert.equal((await loadProgress()).attempts.length, 0);
   });
 });

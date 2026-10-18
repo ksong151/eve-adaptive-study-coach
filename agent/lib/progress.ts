@@ -70,7 +70,6 @@ export async function recordAttempt(input: {
   feedbackSummary: string;
   sources: Array<{ resourceId: string; pages?: number[] }>;
   recommendedResourceId?: string;
-  revisit?: boolean;
 }): Promise<Attempt> {
   const index = await loadCourse(input.courseId);
   const sources: SourceRef[] = [];
@@ -98,7 +97,7 @@ export async function recordAttempt(input: {
     feedbackSummary: input.feedbackSummary,
     sources,
     recommended,
-    revisit: input.revisit ?? input.observation !== "demonstrated",
+    revisit: input.observation !== "demonstrated",
   };
   progress.attempts.push(attempt);
   await writeJson(progressFile(), progress);

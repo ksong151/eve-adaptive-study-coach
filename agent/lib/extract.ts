@@ -26,9 +26,12 @@ function tidy(text: string): string {
 }
 
 export function extractHtml(html: string): Extraction {
-  const root = parse(html);
+  // The parser keeps a doctype as a text node, so strip it before parsing.
+  const root = parse(html.replace(/<!doctype[^>]*>/gi, ""));
   root.querySelectorAll("script, style, noscript, template, svg, nav").forEach((node) => node.remove());
   const title = tidy(root.querySelector("title")?.text ?? "") || tidy(root.querySelector("h1")?.text ?? "");
+  // Some pages (CS144's, for one) parse without a <body>, so drop <head> and use the whole document.
+  root.querySelectorAll("head").forEach((node) => node.remove());
   const body = root.querySelector("body") ?? root;
   const text = tidy(body.structuredText).slice(0, MAX_TEXT_CHARS);
   if (text.length === 0) return { ok: false, reason: "no_text", detail: "The page contains no extractable text." };

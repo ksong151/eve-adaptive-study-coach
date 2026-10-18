@@ -83,6 +83,15 @@ describe("extraction", () => {
     assert.doesNotMatch(result.text, /Back to TOY 101/);
   });
 
+  test("pages that parse without a <body> leave out the doctype and <head>", () => {
+    const page = `<!DOCTYPE html>\n<html><head><title>Toy page</title><meta charset="utf-8"></head>\n<div>Unclosed <p>content`;
+    const result = extractHtml(page);
+    assert.ok(result.ok && result.kind === "html");
+    assert.equal(result.title, "Toy page");
+    assert.doesNotMatch(result.text, /DOCTYPE|Toy page/);
+    assert.match(result.text, /Unclosed\s+content/);
+  });
+
   test("empty HTML is a failure, not empty content", () => {
     const result = extractHtml("<html><body><script>x()</script></body></html>");
     assert.equal(result.ok, false);

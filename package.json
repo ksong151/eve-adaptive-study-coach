@@ -9,7 +9,7 @@
   "scripts": {
     "build": "eve build",
     "deploy": "eve deploy",
-    "dev": "eve dev",
+    "dev": "eve dev --no-default-extensions",
     "eval": "eve eval",
     "start": "eve start",
     "typecheck": "tsc",

@@ -7,7 +7,7 @@ It is a learning aid, not affiliated with any course. It is told to follow each 
 ## Prerequisites
 
 - Node.js with built-in TypeScript type stripping. `package.json` declares Node 24, the scaffold default; this project was tested only on Node 26.8.1.
-- A model connection: run `npx eve dev` and use `/login`, or set `AI_GATEWAY_API_KEY` in `.env.local` (git-ignored). The default model is `openai/gpt-6-luna-fast` through Vercel AI Gateway (`agent/agent.ts`).
+- A model connection: run `npm run dev` and use `/login`, or set `AI_GATEWAY_API_KEY` in `.env.local` (git-ignored). The default model is `openai/gpt-6-luna-fast` through Vercel AI Gateway (`agent/agent.ts`).
 
 Tests, the importer, and `npm run inspect` need no model connection.
 
@@ -18,24 +18,25 @@ npm install
 npm run typecheck
 npm test                 # deterministic tests, mocked HTTP only
 npm run build
-npx eve dev              # chat with the coach
+npm run dev              # chat with the coach (eve dev --no-default-extensions)
 npm run eval             # eve behavior evals; needs a model connection
 npm run inspect -- <courseUrl> [--scope <dirUrl>] [--read r12] [--page 3]   # importer only, no model
 npm run reset-progress
 ```
 
-Example prompt in `npx eve dev`: *"My course is https://cs144.github.io/. Quiz me on how TCP sequence numbers work."*
+Example prompt in `npm run dev`: *"My course is https://cs144.github.io/. Quiz me on how TCP sequence numbers work."*
 
 ## Architecture
 
 - `agent/tools/`: the only tools the model can call: `import_course`, `list_resources`, `read_resource`, `record_attempt`, `get_progress`.
 - `agent/lib/`: URL policy (`scope.ts`), bounded fetcher (`fetcher.ts`), link discovery (`links.ts`), HTML/PDF extraction (`extract.ts`), import and read (`course.ts`), progress (`progress.ts`), learner-URL check (`learner-input.ts`), local storage (`store.ts`).
 - `agent/instructions.md`: study loop, citation, and academic-integrity rules.
+- `agent/extensions/self-modification/`: turns off eve's dev-only self-modification subagent.
 - `test/`, `evals/`, `scripts/`: tests with an original fixture course, eve evals with stubbed tools, and the inspect/reset scripts.
 
 ## Source restrictions (enforced in code)
 
-1. **No general tools.** `defaultTools: false` removes eve's shell, file, web fetch, web search, and agent tools. A test asserts that `eve info` lists only the five course tools.
+1. **No general tools.** `defaultTools: false` removes eve's shell, file, web fetch, web search, and agent tools. A test asserts that `eve info` lists only the five course tools. `eve dev` would also mount a self-modification subagent that edits files under `agent/`; it is turned off with `local: { enabled: false }`, and `npm run dev` passes `--no-default-extensions` to skip eve's other bundled dev extensions.
 2. **Learner-supplied start page.** `import_course` rejects a URL or extra scope that does not appear in the learner's own messages. Page text arrives in tool results, so it cannot supply URLs.
 3. **One page, no crawling.** Import fetches only the start page and indexes its `<a href>` links. URLs in page text and HTML comments are ignored.
 4. **Narrow scope.** Default scope is the start page's directory on its origin. Extra directories must be approved explicitly, be public https, and not be a site root. The import summary groups out-of-scope same-site links by directory so the learner can decide.

@@ -55,12 +55,12 @@ export function checkPublicHttpsUrl(raw: string): UrlDecision {
     if (!isSafeIpAddress(bareHost)) {
       return { allowed: false, reason: "private_or_local_host", detail: `Private, loopback, or link-local address: ${bareHost}` };
     }
-  } else if (
-    host === "localhost" ||
-    LOCAL_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix)) ||
-    !host.includes(".")
-  ) {
-    return { allowed: false, reason: "private_or_local_host", detail: `Local or single-label hostname: ${host}` };
+  } else {
+    // "localhost." is the same host as "localhost", so drop one trailing dot first.
+    const name = host.replace(/\.$/, "");
+    if (name === "localhost" || LOCAL_HOST_SUFFIXES.some((suffix) => name.endsWith(suffix)) || !name.includes(".")) {
+      return { allowed: false, reason: "private_or_local_host", detail: `Local or single-label hostname: ${host}` };
+    }
   }
   url.hash = "";
   return { allowed: true, url };

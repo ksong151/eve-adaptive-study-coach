@@ -232,4 +232,39 @@ describe("bounded fetcher (mocked HTTP)", () => {
     const doc = await boundedFetch(start, scope, { transport: mock.transport, limits: htmlLimits, allowedTypes: ["text/html"] });
     assert.equal(doc.contentType, "text/html");
   });
+
+  test("a body that errors on timeout is reported as a timeout", async () => {
+    const slowBody: Parameters<typeof boundedFetch>[2]["transport"] = async (_url, { signal }) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("<p>partial"));
+            signal.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")));
+          },
+        }),
+        { headers: { "content-type": "text/html" } },
+      );
+    const error = await boundedFetch(`${START_URL}a.html`, scope, {
+      transport: slowBody,
+      limits: { ...htmlLimits, timeoutMs: 50 },
+      allowedTypes: ["text/html"],
+    }).catch((e: unknown) => e);
+    assert.ok(error instanceof FetchRejected, `got ${String(error)}`);
+    assert.equal(error.reason, "timeout");
+  });
+
+  test("a body that fails mid-stream is reported as a network error", async () => {
+    const broken: Parameters<typeof boundedFetch>[2]["transport"] = async () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            controller.error(new Error("connection reset"));
+          },
+        }),
+        { headers: { "content-type": "text/html" } },
+      );
+    const error = await boundedFetch(`${START_URL}a.html`, scope, { transport: broken, limits: htmlLimits, allowedTypes: ["text/html"] }).catch((e: unknown) => e);
+    assert.ok(error instanceof FetchRejected, `got ${String(error)}`);
+    assert.equal(error.reason, "network_error");
+  });
 });

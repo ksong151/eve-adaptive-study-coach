@@ -161,7 +161,16 @@ async function readBounded(response: Response, maxBytes: number, signal: AbortSi
   let total = 0;
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        // An aborted request can error the body stream before the abort listener runs.
+        if (signal.aborted) throw new FetchRejected("timeout", url, `Reading ${url} timed out.`);
+        const message = error instanceof Error ? error.message : String(error);
+        throw new FetchRejected("network_error", url, `Reading ${url} failed: ${message}`);
+      }
+      const { done, value } = chunk;
       if (signal.aborted) throw new FetchRejected("timeout", url, `Reading ${url} timed out.`);
       if (done) break;
       total += value.byteLength;

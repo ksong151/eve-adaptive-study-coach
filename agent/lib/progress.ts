@@ -72,6 +72,9 @@ async function recordAttemptUnlocked(input: {
   recommendedResourceId?: string;
 }): Promise<Attempt> {
   const index = await loadCourse(input.courseId);
+  // Collapse whitespace so "Hit  rate" and "Hit rate" are one concept.
+  const concept = input.concept.replace(/\s+/g, " ").trim();
+  if (concept === "") throw new CourseError("The concept name must not be empty.");
   const sources: SourceRef[] = [];
   for (const ref of input.sources) {
     const { contentRead: _read, ...source } = await resolveSource(index, ref, true);
@@ -80,6 +83,9 @@ async function recordAttemptUnlocked(input: {
   const recommended = input.recommendedResourceId
     ? await resolveSource(index, { resourceId: input.recommendedResourceId }, false)
     : undefined;
+  if (recommended && index.resources.find((r) => r.id === recommended.resourceId)?.status === "blocked") {
+    throw new CourseError(`Resource ${recommended.resourceId} is blocked (not https, or a local address), so it cannot be recommended.`);
+  }
 
   const progress = await loadProgress();
   // A durable step can re-run after an interruption; the tool call id makes the write idempotent.
@@ -90,7 +96,7 @@ async function recordAttemptUnlocked(input: {
     id: input.attemptId,
     recordedAt: new Date().toISOString(),
     courseId: index.courseId,
-    concept: input.concept.trim(),
+    concept,
     question: input.question,
     learnerAnswer: input.learnerAnswer,
     observation: input.observation,

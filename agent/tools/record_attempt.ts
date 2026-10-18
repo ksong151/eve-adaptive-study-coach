@@ -9,7 +9,7 @@ export default defineTool({
     "sources must be resources you actually read; cited pages must be extracted PDF pages. Calls citing unread resources are rejected.",
   inputSchema: z.strictObject({
     courseId: z.string().min(1).max(80),
-    concept: z.string().min(1).max(120).describe("Short name of the concept tested, e.g. 'TCP sequence numbers'."),
+    concept: z.string().trim().min(1).max(120).describe("Short name of the concept tested, e.g. 'TCP sequence numbers'."),
     question: z.string().min(1).max(1500),
     learnerAnswer: z.string().min(1).max(4000).describe("The learner's answer, verbatim."),
     observation: z.enum(OBSERVATIONS),

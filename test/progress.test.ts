@@ -158,3 +158,33 @@ describe("concurrent saves", () => {
     assert.deepEqual((await loadProgress()).attempts.map((a) => a.id).sort(), ["p-1", "p-2", "p-3"]);
   });
 });
+
+describe("attempt validation", () => {
+  let index: CourseIndex;
+  const base = () => ({ courseId: index.courseId, question: "q", learnerAnswer: "a", observation: "needs_review" as const, feedbackSummary: "f", sources: [{ resourceId: "r1" }] });
+
+  before(async () => {
+    await resetProgress();
+    const mock = mockTransport(toyCourseRoutes());
+    index = await importCourse({ startUrl: START_URL, additionalScopes: [] }, { transport: mock.transport });
+  });
+
+  test("a concept made only of whitespace is rejected", async () => {
+    await assert.rejects(recordAttempt({ ...base(), attemptId: "v-1", concept: "   " }), /must not be empty/);
+  });
+
+  test("whitespace inside a concept name is collapsed, so near-duplicates merge", async () => {
+    await recordAttempt({ ...base(), attemptId: "v-2", concept: "Hit  rate" });
+    const later = await recordAttempt({ ...base(), attemptId: "v-3", concept: " hit rate ", observation: "demonstrated" });
+    assert.equal(later.concept, "hit rate");
+    assert.deepEqual((await progressSummary(index.courseId)).revisit, []);
+  });
+
+  test("a blocked link cannot be recommended, but an external one can", async () => {
+    const blocked = index.resources.find((r) => r.status === "blocked")!;
+    const external = index.resources.find((r) => r.status === "external")!;
+    await assert.rejects(recordAttempt({ ...base(), attemptId: "v-4", concept: "x", recommendedResourceId: blocked.id }), /cannot be recommended/);
+    const saved = await recordAttempt({ ...base(), attemptId: "v-5", concept: "x", recommendedResourceId: external.id });
+    assert.equal(saved.recommended?.contentRead, false);
+  });
+});

@@ -162,6 +162,7 @@ describe("read_resource and record_attempt tools", () => {
     const schema = recordAttemptTool.inputSchema as unknown as { safeParse(v: unknown): { success: boolean } };
     assert.ok(schema.safeParse(input).success);
     assert.ok(!schema.safeParse({ ...input, url: "https://evil.example/" }).success);
+    assert.ok(!schema.safeParse({ ...input, concept: "   " }).success, "whitespace-only concept");
     await recordAttemptTool.execute(input as never, { ...ctx([]), callId: "call-xyz" } as never);
     assert.ok((await loadProgress()).attempts.some((a) => a.id === "call-xyz"));
   });

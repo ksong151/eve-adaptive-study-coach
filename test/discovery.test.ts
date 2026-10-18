@@ -71,6 +71,9 @@ describe("link discovery", () => {
     assert.equal(kindFromPath("/a/check0.PDF"), "pdf");
     assert.equal(kindFromPath("/a/readme.txt"), "other");
     assert.equal(kindFromPath("/a/notebook.ipynb"), "other");
+    assert.equal(kindFromPath("/class/archive/cs/cs107/cs107.1272"), "html", "a dot in a directory name is not an extension");
+    assert.equal(kindFromPath("/a/lecture.v2"), "html", "unknown extensions are left to the content-type check");
+    assert.equal(kindFromPath("/a/slides.PPTX"), "other");
   });
 });
 

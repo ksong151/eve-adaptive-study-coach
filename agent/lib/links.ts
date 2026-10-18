@@ -45,13 +45,25 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
+/** File types this version never reads, so they are not fetched at all. */
+const UNSUPPORTED_EXTENSIONS = new Set([
+  "zip", "gz", "tgz", "tar", "ipynb", "txt", "md", "csv", "json",
+  "png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "mp4", "mov", "webm", "mp3", "wav",
+  "ppt", "pptx", "doc", "docx", "xls", "xlsx", "key",
+  "c", "h", "cpp", "py", "java", "js", "css", "s",
+]);
+
+/**
+ * Guesses the kind from the path. Anything not known to be another format is
+ * treated as a page; the content-type check decides when it is fetched. So
+ * "cs107.1272" (a directory without a trailing slash) is a page, not a file.
+ */
 export function kindFromPath(pathname: string): ResourceKind {
   const last = pathname.slice(pathname.lastIndexOf("/") + 1).toLowerCase();
-  if (last === "" || !last.includes(".")) return "html";
-  const ext = last.slice(last.lastIndexOf(".") + 1);
+  const ext = last.includes(".") ? last.slice(last.lastIndexOf(".") + 1) : "";
   if (ext === "pdf") return "pdf";
-  if (ext === "html" || ext === "htm") return "html";
-  return "other";
+  if (UNSUPPORTED_EXTENSIONS.has(ext)) return "other";
+  return "html";
 }
 
 function externalNote(host: string): string {

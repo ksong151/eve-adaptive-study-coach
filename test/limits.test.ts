@@ -1,9 +1,9 @@
-// Per-course budgets, HTML paging, and scope hints. Each case builds its own
+// Per-course budgets, HTML paging, and the same-site boundary. Each case builds its own
 // small course from mocked routes.
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { importCourse, readResource, summarizeIndex, LIMITS, type CourseIndex } from "../agent/lib/course.ts";
-import { html, makePdf, mockTransport, pdf, useTempDataDir, START_URL, FIXTURE_ORIGIN, type Route } from "./helpers.ts";
+import { importCourse, readResource, LIMITS, type CourseIndex } from "../agent/lib/course.ts";
+import { html, makePdf, mockTransport, pdf, redirect, useTempDataDir, START_URL, FIXTURE_ORIGIN, type Route } from "./helpers.ts";
 
 // Cached text is shared by URL, so each test gets an empty data directory.
 beforeEach(() => {
@@ -71,18 +71,24 @@ describe("HTML paging", () => {
   });
 });
 
-describe("scope hints", () => {
-  test("groups same-site links outside scope by their top two directories", async () => {
-    const page = [
-      `<a href="${FIXTURE_ORIGIN}/winter/assets/files/l1.pdf">1</a>`,
-      `<a href="${FIXTURE_ORIGIN}/winter/assets/img/x.png">2</a>`,
-      `<a href="${FIXTURE_ORIGIN}/bank/q.pdf">3</a>`,
-      `<a href="https://elsewhere.example/a.pdf">external, not a hint</a>`,
-    ].join(" ");
-    const { index } = await course(page);
-    assert.deepEqual(summarizeIndex(index).outsideScopePrefixes, [
-      { prefix: `${FIXTURE_ORIGIN}/winter/assets/`, links: 2 },
-      { prefix: `${FIXTURE_ORIGIN}/bank/`, links: 1 },
-    ]);
+describe("same-site boundary", () => {
+  test("a redirect elsewhere on the course site is followed", async () => {
+    const { index, mock, id } = await course(`<a href="moved.html">Moved notes</a>`, {
+      [`${START_URL}moved.html`]: redirect(`${FIXTURE_ORIGIN}/archive/toy101/notes.html`),
+      [`${FIXTURE_ORIGIN}/archive/toy101/notes.html`]: html("<p>archived notes</p>"),
+    });
+    const result = await read(index, id("moved.html"), mock.transport);
+    assert.ok(result.read);
+    assert.match(result.text ?? "", /archived notes/);
+  });
+
+  test("a redirect to another site, even a subdomain, is rejected before it is requested", async () => {
+    const target = "https://sub.toy-course.example/toy101/notes.html";
+    const { index, mock, id } = await course(`<a href="moved.html">Moved notes</a>`, {
+      [`${START_URL}moved.html`]: redirect(target),
+    });
+    const result = await read(index, id("moved.html"), mock.transport);
+    assert.equal(!result.read && result.reason, "redirect_rejected");
+    assert.ok(!mock.requests.includes(target));
   });
 });

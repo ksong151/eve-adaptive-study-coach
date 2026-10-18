@@ -12,7 +12,6 @@ const importResult = {
   approvedScope: COURSE_URL,
   resourceCounts: { readable: 3, external: 2 },
   truncatedLinks: 0,
-  outsideScopePrefixes: [],
   readableResources: [
     { id: "r1", title: "TOY 101: Caching Basics", kind: "html", section: "" },
     { id: "r2", title: "Cache basics notes", kind: "html", section: "Week 1: Caches" },

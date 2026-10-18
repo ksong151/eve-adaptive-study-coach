@@ -7,13 +7,11 @@ import { checkPublicHttpsUrl, isInScope, type CourseScope } from "./scope.ts";
 export type ResourceKind = "html" | "pdf" | "other";
 
 export type ResourceStatus =
-  /** In scope with a supported format; read_resource may fetch it. */
+  /** On the course site (or an approved source) with a supported format; read_resource may fetch it. */
   | "readable"
-  /** In scope, but a format this version does not extract (zip, notebook, image, ...). */
+  /** On the course site, but a format this version does not extract (zip, notebook, image, ...). */
   | "unsupported_format"
-  /** Same site, outside the approved path prefixes. Listed only. */
-  | "outside_scope"
-  /** Different site. Listed only; never fetched. */
+  /** A different site that the learner has not approved. Listed only; never fetched. */
   | "external"
   /** Not https, or a local/private address. Listed only. */
   | "blocked";
@@ -95,9 +93,6 @@ function classify(url: URL, scope: CourseScope): Pick<DiscoveredLink, "kind" | "
     return kind === "other"
       ? { kind, status: "unsupported_format", note: "Format not supported in this version: content unavailable." }
       : { kind, status: "readable", note: "" };
-  }
-  if (scope.entries.some((entry) => entry.origin === url.origin)) {
-    return { kind, status: "outside_scope", note: "Same site but outside the approved course path: not fetched." };
   }
   return { kind, status: "external", note: externalNote(url.hostname.toLowerCase()) };
 }

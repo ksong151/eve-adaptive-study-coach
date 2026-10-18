@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { discoverLinks, kindFromPath } from "../agent/lib/links.ts";
 import { extractHtml, extractPdf } from "../agent/lib/extract.ts";
+import { buildScope } from "../agent/lib/scope.ts";
 import { fixture, makePdf, START_URL, FIXTURE_ORIGIN, LECTURE1_PAGES } from "./helpers.ts";
 
-const scope = { entries: [{ origin: FIXTURE_ORIGIN, pathPrefix: "/toy101/" }] };
+const built = buildScope(new URL(START_URL), []);
+if ("error" in built) throw new Error(built.error);
+const { scope } = built;
 
 describe("link discovery", () => {
   const { pageTitle, links, truncated } = discoverLinks(fixture("index.html"), START_URL, scope, 100);
@@ -27,7 +30,7 @@ describe("link discovery", () => {
     assert.equal(byUrl.get(`${START_URL}notes/cache-basics.html`)?.status, "readable");
     assert.equal(byUrl.get(`${START_URL}files/starter.zip`)?.status, "unsupported_format");
     assert.equal(byUrl.get("https://ads.tracker-example.test/click?campaign=exam-prep")?.status, "external");
-    assert.equal(byUrl.get(`${FIXTURE_ORIGIN}/other-course/notes.html`)?.status, "outside_scope");
+    assert.equal(byUrl.get(`${FIXTURE_ORIGIN}/other-course/notes.html`)?.status, "readable", "same site, other directory");
     assert.equal(byUrl.get("http://toy-course.example/toy101/insecure.html")?.status, "blocked");
     assert.equal(byUrl.get("https://127.0.0.1/admin")?.status, "blocked");
     const doc = byUrl.get("https://docs.google.com/document/d/toy-doc/edit");

@@ -55,7 +55,7 @@ describe("URL policy", () => {
   }
 
   test("additional scopes cannot be a site root", () => {
-    const result = buildScope(new URL(START_URL), ["https://toy-course.example/"]);
+    const result = buildScope(new URL(START_URL), ["https://files.example-cdn.test/"]);
     assert.ok("error" in result);
     assert.match(result.error, /site root/);
   });
@@ -65,12 +65,19 @@ describe("URL policy", () => {
     assert.ok("error" in buildScope(new URL(START_URL), ["http://toy-course.example/files/"]));
   });
 
-  test("an approved sibling directory is added as its own narrow entry", () => {
-    const result = buildScope(new URL(START_URL), ["https://toy-course.example/shared-assets/"]);
+  test("the default scope is the start page's whole site, and nothing else", () => {
+    const result = buildScope(new URL(START_URL), []);
     assert.ok("scope" in result);
-    assert.deepEqual(result.scope.entries.map((e) => e.pathPrefix), ["/toy101/", "/shared-assets/"]);
-    assert.equal(checkFetchAllowed("https://toy-course.example/shared-assets/a.pdf", result.scope).allowed, true);
-    assert.equal(checkFetchAllowed("https://toy-course.example/other/a.pdf", result.scope).allowed, false);
+    assert.equal(checkFetchAllowed("https://toy-course.example/archive/toy101/a.pdf", result.scope).allowed, true);
+    assert.equal(checkFetchAllowed("https://sub.toy-course.example/toy101/a.pdf", result.scope).allowed, false, "other subdomain");
+    assert.equal(checkFetchAllowed("https://ads.tracker-example.test/x", result.scope).allowed, false);
+  });
+
+  test("an approved other-site directory is added as its own narrow entry", () => {
+    const result = buildScope(new URL(START_URL), ["https://files.example-cdn.test/toy101/"]);
+    assert.ok("scope" in result);
+    assert.equal(checkFetchAllowed("https://files.example-cdn.test/toy101/a.pdf", result.scope).allowed, true);
+    assert.equal(checkFetchAllowed("https://files.example-cdn.test/other/a.pdf", result.scope).allowed, false);
   });
 
   test("checkPublicHttpsUrl drops fragments", () => {

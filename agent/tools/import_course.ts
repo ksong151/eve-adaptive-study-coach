@@ -8,7 +8,7 @@ import { checkPublicHttpsUrl } from "../lib/scope.ts";
 export default defineTool({
   description:
     "Import a public course page the learner gave you. Fetches only that one page and indexes its direct links; it does not crawl. " +
-    "The default approved scope is the page's own directory. Pass additionalScopes only for directory URLs the learner explicitly approved in their own message. " +
+    "Links on the same site as that page can be read; links to other sites are listed only. Pass additionalScopes only for other-site directory URLs the learner explicitly approved in their own message. " +
     "Both startUrl and every additionalScopes entry must appear verbatim in the learner's messages, or the call is rejected.",
   inputSchema: z.strictObject({
     startUrl: z.string().min(1).max(500).describe("The course homepage or materials page URL exactly as the learner wrote it."),
@@ -16,7 +16,7 @@ export default defineTool({
       .array(z.string().min(1).max(500))
       .max(3)
       .default([])
-      .describe("Extra directory URLs the learner explicitly approved, e.g. a sibling assets directory."),
+      .describe("Directory URLs on other sites that the learner explicitly approved."),
   }),
   async execute({ startUrl, additionalScopes }, ctx) {
     const text = learnerText(ctx.messages);

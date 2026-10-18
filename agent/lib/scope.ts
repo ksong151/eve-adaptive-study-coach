@@ -94,21 +94,22 @@ export function checkFetchAllowed(raw: string, scope: CourseScope): UrlDecision 
 
 /**
  * Builds a scope from the start page plus any additional prefixes the learner
- * approved. The start page contributes its own directory. Additional prefixes
- * must be valid public https URLs and must not be a site root, so approval can
- * never silently widen to a whole domain.
+ * approved. The start page contributes its whole site (origin): only links
+ * found on that page are ever indexed, so this widens which of those links
+ * can be read, not what can be discovered. Additional prefixes, for other
+ * sites, must be valid public https URLs and must not be a site root.
  */
 export function buildScope(
   startUrl: URL,
   additionalPrefixes: readonly string[],
 ): { scope: CourseScope } | { error: string } {
-  const entries: ScopeEntry[] = [{ origin: startUrl.origin, pathPrefix: directoryPrefix(startUrl) }];
+  const entries: ScopeEntry[] = [{ origin: startUrl.origin, pathPrefix: "/" }];
   for (const raw of additionalPrefixes) {
     const decision = checkPublicHttpsUrl(raw);
     if (!decision.allowed) return { error: `Additional scope ${raw} rejected: ${decision.detail}` };
     const prefix = directoryPrefix(decision.url);
     if (prefix === "/") {
-      return { error: `Additional scope ${raw} is a site root. Approve a specific course directory instead.` };
+      return { error: `Additional scope ${raw} is a site root. Approve a specific directory instead.` };
     }
     const entry = { origin: decision.url.origin, pathPrefix: prefix };
     if (!entries.some((e) => e.origin === entry.origin && e.pathPrefix === entry.pathPrefix)) {

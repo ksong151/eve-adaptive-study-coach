@@ -98,6 +98,7 @@ export function toyCourseRoutes(): Record<string, Route> {
   return {
     [START_URL]: html(fixture("index.html")),
     [`${START_URL}notes/cache-basics.html`]: html(fixture("notes/cache-basics.html")),
+    [`${FIXTURE_ORIGIN}/other-course/notes.html`]: html("<h1>Another course</h1><p>Same site, different directory.</p>"),
     [`${START_URL}slides/lecture1.pdf`]: pdf(makePdf(LECTURE1_PAGES)),
     [`${START_URL}slides/scanned.pdf`]: pdf(makePdf([[], []])),
     [`${START_URL}handouts/broken.pdf`]: () =>

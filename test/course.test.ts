@@ -62,12 +62,20 @@ describe("course import and reading (mocked HTTP)", () => {
     assert.ok(!mock.requests.some((u) => u.includes("tracker-example")));
   });
 
-  test("blocked and outside-scope links are never requested", async () => {
-    for (const r of index.resources.filter((res) => res.status === "blocked" || res.status === "outside_scope")) {
+  test("blocked links are never requested", async () => {
+    for (const r of index.resources.filter((res) => res.status === "blocked")) {
       const result = await readResource({ courseId: index.courseId, resourceId: r.id }, { transport: mock.transport });
       assert.equal(result.read, false, r.url);
     }
-    assert.ok(!mock.requests.some((u) => u.includes("127.0.0.1") || u.includes("/other-course/") || u.startsWith("http:")));
+    assert.ok(!mock.requests.some((u) => u.includes("127.0.0.1") || u.startsWith("http:")));
+  });
+
+  test("a same-site link outside the course directory is readable", async () => {
+    const r = index.resources.find((res) => res.url === "https://toy-course.example/other-course/notes.html");
+    assert.equal(r?.status, "readable");
+    const result = await readResource({ courseId: index.courseId, resourceId: r!.id }, { transport: mock.transport });
+    assert.ok(result.read);
+    assert.match(result.text ?? "", /Same site, different directory/);
   });
 
   test("off-site redirect: the redirect target is never requested and the failure is recorded", async () => {

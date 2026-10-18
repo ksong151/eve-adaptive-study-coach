@@ -74,9 +74,9 @@ export class CourseError extends Error {
   }
 }
 
-export function courseIdFor(scope: CourseScope): string {
-  const first = scope.entries[0]!;
-  const slug = `${new URL(first.origin).hostname}${first.pathPrefix}`
+/** Stable id from the start page's host and directory, e.g. "web-stanford-edu-class-cs107". */
+export function courseIdFor(startUrl: URL): string {
+  const slug = `${startUrl.hostname}${directoryPrefix(startUrl)}`
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
@@ -164,7 +164,7 @@ export async function importCourse(
 
   const index: CourseIndex = {
     version: 1,
-    courseId: courseIdFor(scope),
+    courseId: courseIdFor(start.url),
     startUrl: fetched.finalUrl,
     pageTitle: discovered.pageTitle,
     scope,
@@ -177,20 +177,6 @@ export async function importCourse(
   return index;
 }
 
-/** Same-site path prefixes that hold out-of-scope links, to help the learner decide on scope. */
-export function outsideScopePrefixes(index: CourseIndex): Array<{ prefix: string; links: number }> {
-  const counts = new Map<string, number>();
-  for (const r of index.resources) {
-    if (r.status !== "outside_scope") continue;
-    const url = new URL(r.url);
-    const dir = directoryPrefix(url);
-    const segments = dir.split("/").filter(Boolean);
-    const key = `${url.origin}/${segments.slice(0, Math.min(2, segments.length)).join("/")}${segments.length ? "/" : ""}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return [...counts.entries()].map(([prefix, links]) => ({ prefix, links })).sort((a, b) => b.links - a.links);
-}
-
 export function summarizeIndex(index: CourseIndex) {
   const byStatus: Record<string, number> = {};
   for (const r of index.resources) byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
@@ -201,7 +187,6 @@ export function summarizeIndex(index: CourseIndex) {
     approvedScope: describeScope(index.scope),
     resourceCounts: byStatus,
     truncatedLinks: index.truncatedLinks,
-    outsideScopePrefixes: outsideScopePrefixes(index).slice(0, 5),
   };
 }
 

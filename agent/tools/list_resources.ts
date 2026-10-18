@@ -5,10 +5,10 @@ import { loadCourse } from "../lib/course.ts";
 export default defineTool({
   description:
     "List indexed resources of an imported course, with their status: readable (may be read with read_resource), " +
-    "unsupported_format, outside_scope, external, or blocked (listed only; contents unavailable). Filter by status; page with offset.",
+    "unsupported_format, external, or blocked (listed only; contents unavailable). Filter by status; page with offset.",
   inputSchema: z.strictObject({
     courseId: z.string().min(1).max(80),
-    status: z.enum(["readable", "unsupported_format", "outside_scope", "external", "blocked", "all"]).default("all"),
+    status: z.enum(["readable", "unsupported_format", "external", "blocked", "all"]).default("all"),
     offset: z.number().int().min(0).default(0),
     limit: z.number().int().min(1).max(100).default(60),
   }),

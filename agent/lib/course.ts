@@ -63,6 +63,8 @@ export interface CachedContent {
   text?: string;
   pages?: ExtractedPage[];
   totalPages?: number;
+  /** Extraction stopped at the text size limit, so the end of this resource was not read. */
+  textLimitReached?: boolean;
   bytes: number;
   extractedAt: string;
 }
@@ -96,7 +98,7 @@ const ALLOWED_TYPES: Record<Exclude<ResourceKind, "other">, SupportedContentType
 };
 
 function extractionToCache(extraction: Extraction & { ok: true }, url: string, finalUrl: string, bytes: number): CachedContent {
-  const base = { url, finalUrl, bytes, extractedAt: new Date().toISOString() };
+  const base = { url, finalUrl, bytes, extractedAt: new Date().toISOString(), textLimitReached: extraction.textLimitReached };
   return extraction.kind === "pdf"
     ? { ...base, title: "", kind: "pdf", pages: extraction.pages, totalPages: extraction.totalPages }
     : { ...base, title: extraction.title, kind: "html", text: extraction.text };
@@ -214,12 +216,15 @@ export type ReadResult =
       /** PDF: the pages returned in this call. */
       pages?: ExtractedPage[];
       totalPages?: number;
+      /** PDF: where to continue. With nextOffset, continue inside that page. */
       nextPage?: number;
       /** HTML: the slice returned in this call. */
       text?: string;
       offset?: number;
       nextOffset?: number;
       totalChars?: number;
+      /** Set when this read reached the end of the extracted text but extraction had stopped early. */
+      notice?: string;
     }
   | {
       read: false;
@@ -237,30 +242,47 @@ function notRead(index: CourseIndex, r: Resource, reason: string, detail: string
 
 function windowContent(index: CourseIndex, r: Resource, content: CachedContent, page: number, offset: number): ReadResult {
   const base = { read: true as const, courseId: index.courseId, resourceId: r.id, title: content.title || r.title, url: r.url, kind: content.kind };
+  const max = LIMITS.maxCharsPerRead;
   if (content.kind === "pdf") {
     const pages = content.pages ?? [];
     const out: ExtractedPage[] = [];
     let chars = 0;
+    let nextPage: number | undefined;
+    let nextOffset: number | undefined;
     for (const p of pages) {
       if (p.page < page) continue;
-      if (out.length > 0 && chars + p.text.length > LIMITS.maxCharsPerRead) break;
-      const text =
-        p.text.length === 0
-          ? EMPTY_PAGE
-          : p.text.length > LIMITS.maxCharsPerRead
-            ? `${p.text.slice(0, LIMITS.maxCharsPerRead)} [page truncated]`
-            : p.text;
+      // offset applies within the first requested page only.
+      const start = p.page === page ? Math.min(offset, p.text.length) : 0;
+      const text = p.text.length === 0 ? EMPTY_PAGE : p.text.slice(start);
+      if (out.length > 0 && chars + text.length > max) {
+        nextPage = p.page;
+        break;
+      }
+      if (text.length > max) {
+        // One long page: return part of it and say where to continue.
+        out.push({ page: p.page, text: text.slice(0, max) });
+        nextPage = p.page;
+        nextOffset = start + max;
+        break;
+      }
       out.push({ page: p.page, text });
       chars += text.length;
     }
-    const last = out.at(-1)?.page;
-    const next = last === undefined ? undefined : pages.find((p) => p.page > last)?.page;
-    return { ...base, pages: out, totalPages: content.totalPages, nextPage: next };
+    const lastExtracted = pages.at(-1)?.page ?? 0;
+    const notice =
+      nextPage === undefined && content.textLimitReached
+        ? `Text extraction stopped at page ${lastExtracted} of ${content.totalPages} because of the size limit; the rest of this PDF was not read.`
+        : undefined;
+    return { ...base, pages: out, totalPages: content.totalPages, nextPage, nextOffset, notice };
   }
   const text = content.text ?? "";
-  const slice = text.slice(offset, offset + LIMITS.maxCharsPerRead);
+  const slice = text.slice(offset, offset + max);
   const nextOffset = offset + slice.length < text.length ? offset + slice.length : undefined;
-  return { ...base, text: slice, offset, nextOffset, totalChars: text.length };
+  const notice =
+    nextOffset === undefined && content.textLimitReached
+      ? "Text extraction stopped at the size limit; the rest of this page was not read."
+      : undefined;
+  return { ...base, text: slice, offset, nextOffset, totalChars: text.length, notice };
 }
 
 /**

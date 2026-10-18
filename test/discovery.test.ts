@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
+import { afterEach, describe, test } from "node:test";
 import { discoverLinks, kindFromPath } from "../agent/lib/links.ts";
-import { extractHtml, extractPdf } from "../agent/lib/extract.ts";
+import { extractHtml, extractPdf, EXTRACT_LIMITS } from "../agent/lib/extract.ts";
 import { buildScope } from "../agent/lib/scope.ts";
 import { fixture, makePdf, START_URL, FIXTURE_ORIGIN, LECTURE1_PAGES } from "./helpers.ts";
 
@@ -175,5 +175,38 @@ describe("test PDF generator", () => {
     const entries = [...text.slice(xrefAt).matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
     assert.ok(entries.length > 3);
     entries.forEach((offset, i) => assert.ok(text.startsWith(`${i + 1} 0 obj`, offset), `object ${i + 1}`));
+  });
+});
+
+describe("text size limit", () => {
+  const original = EXTRACT_LIMITS.maxTextChars;
+  afterEach(() => {
+    EXTRACT_LIMITS.maxTextChars = original;
+  });
+
+  test("a PDF that hits the limit keeps what fits and says the rest was not read", async () => {
+    EXTRACT_LIMITS.maxTextChars = 30;
+    const result = await extractPdf(makePdf([["page one text here"], ["page two text here"], ["page three text"]]));
+    assert.ok(result.ok && result.kind === "pdf");
+    assert.equal(result.textLimitReached, true);
+    assert.equal(result.totalPages, 3);
+    assert.deepEqual(result.pages.map((p) => p.page), [1, 2]);
+    assert.equal(result.pages.map((p) => p.text).join("").length, 30);
+  });
+
+  test("a first page longer than the limit is cut, not reported as having no text", async () => {
+    EXTRACT_LIMITS.maxTextChars = 5;
+    const result = await extractPdf(makePdf([["abcdefghij"]]));
+    assert.ok(result.ok && result.kind === "pdf", "not no_text");
+    assert.equal(result.pages[0]?.text, "abcde");
+    assert.equal(result.textLimitReached, true);
+  });
+
+  test("HTML past the limit is flagged, and text under it is not", () => {
+    EXTRACT_LIMITS.maxTextChars = 10;
+    const long = extractHtml("<p>0123456789 and more</p>");
+    assert.ok(long.ok && long.kind === "html" && long.textLimitReached);
+    const short = extractHtml("<p>tiny</p>");
+    assert.ok(short.ok && short.kind === "html" && !short.textLimitReached);
   });
 });

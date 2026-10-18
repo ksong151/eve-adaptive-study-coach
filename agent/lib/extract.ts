@@ -8,13 +8,17 @@ export interface ExtractedPage {
   text: string;
 }
 
+/** textLimitReached: the text was cut at EXTRACT_LIMITS.maxTextChars, so the rest was not read. */
 export type Extraction =
-  | { ok: true; title: string; kind: "html"; text: string }
-  | { ok: true; kind: "pdf"; pages: ExtractedPage[]; totalPages: number }
+  | { ok: true; title: string; kind: "html"; text: string; textLimitReached: boolean }
+  | { ok: true; kind: "pdf"; pages: ExtractedPage[]; totalPages: number; textLimitReached: boolean }
   | { ok: false; reason: "no_text" | "parse_failed" | "too_many_pages"; detail: string };
 
-const MAX_PDF_PAGES = 200;
-const MAX_TEXT_CHARS = 400_000;
+export const EXTRACT_LIMITS = {
+  maxPdfPages: 200,
+  /** Characters of text kept per resource; anything after this is not read. */
+  maxTextChars: 400_000,
+};
 
 function tidy(text: string): string {
   return text
@@ -33,9 +37,10 @@ export function extractHtml(html: string): Extraction {
   // Some pages (CS144's, for one) parse without a <body>, so drop <head> and use the whole document.
   root.querySelectorAll("head").forEach((node) => node.remove());
   const body = root.querySelector("body") ?? root;
-  const text = tidy(body.structuredText).slice(0, MAX_TEXT_CHARS);
-  if (text.length === 0) return { ok: false, reason: "no_text", detail: "The page contains no extractable text." };
-  return { ok: true, title, kind: "html", text };
+  const full = tidy(body.structuredText);
+  if (full.length === 0) return { ok: false, reason: "no_text", detail: "The page contains no extractable text." };
+  const text = full.slice(0, EXTRACT_LIMITS.maxTextChars);
+  return { ok: true, title, kind: "html", text, textLimitReached: text.length < full.length };
 }
 
 export async function extractPdf(bytes: Uint8Array): Promise<Extraction> {
@@ -50,17 +55,24 @@ export async function extractPdf(bytes: Uint8Array): Promise<Extraction> {
     return { ok: false, reason: "parse_failed", detail: `PDF could not be parsed: ${errorMessage(error)}` };
   }
   try {
-    if (pdf.numPages > MAX_PDF_PAGES) {
-      return { ok: false, reason: "too_many_pages", detail: `PDF has ${pdf.numPages} pages; limit is ${MAX_PDF_PAGES}.` };
+    if (pdf.numPages > EXTRACT_LIMITS.maxPdfPages) {
+      return { ok: false, reason: "too_many_pages", detail: `PDF has ${pdf.numPages} pages; limit is ${EXTRACT_LIMITS.maxPdfPages}.` };
     }
     const { totalPages, text } = await extractText(pdf, { mergePages: false });
-    let chars = 0;
+    let room = EXTRACT_LIMITS.maxTextChars;
+    let textLimitReached = false;
     const pages: ExtractedPage[] = [];
-    text.forEach((pageText, index) => {
+    for (const [index, pageText] of text.entries()) {
       const cleaned = tidy(pageText);
-      chars += cleaned.length;
-      if (chars <= MAX_TEXT_CHARS) pages.push({ page: index + 1, text: cleaned });
-    });
+      if (cleaned.length > room) {
+        // Keep what fits of this page, then stop: later pages were not read.
+        if (room > 0) pages.push({ page: index + 1, text: cleaned.slice(0, room) });
+        textLimitReached = true;
+        break;
+      }
+      pages.push({ page: index + 1, text: cleaned });
+      room -= cleaned.length;
+    }
     if (pages.every((p) => p.text.length === 0)) {
       return {
         ok: false,
@@ -68,7 +80,7 @@ export async function extractPdf(bytes: Uint8Array): Promise<Extraction> {
         detail: "No text layer found (the PDF may be scanned images). Its contents were not read.",
       };
     }
-    return { ok: true, kind: "pdf", pages, totalPages };
+    return { ok: true, kind: "pdf", pages, totalPages, textLimitReached };
   } catch (error) {
     return { ok: false, reason: "parse_failed", detail: `PDF text extraction failed: ${errorMessage(error)}` };
   } finally {

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { importCourse, readResource, listCourses, loadCourse, LIMITS, type CourseIndex } from "../agent/lib/course.ts";
 import { html, makePdf, mockTransport, pdf, redirect, useTempDataDir, START_URL, FIXTURE_ORIGIN, type Route } from "./helpers.ts";
+import { EXTRACT_LIMITS } from "../agent/lib/extract.ts";
 
 // Cached text is shared by URL, so each test gets an empty data directory.
 beforeEach(() => {
@@ -11,10 +12,12 @@ beforeEach(() => {
 });
 
 const original = { fetches: LIMITS.maxFetchesPerCourse, bytes: LIMITS.maxBytesPerCourse, chars: LIMITS.maxCharsPerRead };
+const originalTextChars = EXTRACT_LIMITS.maxTextChars;
 afterEach(() => {
   LIMITS.maxFetchesPerCourse = original.fetches;
   LIMITS.maxBytesPerCourse = original.bytes;
   LIMITS.maxCharsPerRead = original.chars;
+  EXTRACT_LIMITS.maxTextChars = originalTextChars;
 });
 
 async function course(startHtml: string, routes: Record<string, Route> = {}) {
@@ -173,3 +176,44 @@ describe("concurrent tool calls", () => {
     assert.equal((await loadCourse(index.courseId)).usage.fetches, 3);
   });
 });
+
+describe("reading long and truncated text", () => {
+  test("a PDF page longer than one read continues inside the same page", async () => {
+    const { index, mock, id } = await course(`<a href="a.pdf">Alpha</a>`, {
+      [`${START_URL}a.pdf`]: pdf(makePdf([["first page text that is long"], ["second page"]])),
+    });
+    LIMITS.maxCharsPerRead = 10;
+    const one = await read(index, id("a.pdf"), mock.transport);
+    assert.ok(one.read);
+    assert.deepEqual(one.pages, [{ page: 1, text: "first page" }]);
+    assert.equal(one.nextPage, 1);
+    assert.equal(one.nextOffset, 10);
+    const two = await readResource({ courseId: index.courseId, resourceId: id("a.pdf"), page: 1, offset: 10 }, { transport: mock.transport });
+    assert.ok(two.read);
+    assert.equal(two.pages?.[0]?.text, " text that");
+    const rest = await readResource({ courseId: index.courseId, resourceId: id("a.pdf"), page: 1, offset: 20 }, { transport: mock.transport });
+    assert.ok(rest.read);
+    assert.deepEqual(rest.pages, [{ page: 1, text: " is long" }]);
+    assert.equal(rest.nextPage, 2, "page 2 does not fit in the remaining room");
+    assert.equal(rest.nextOffset, undefined);
+  });
+
+  test("reaching the end of text cut by the size limit returns a notice", async () => {
+    EXTRACT_LIMITS.maxTextChars = 30;
+    const { index, mock, id } = await course(`<a href="a.pdf">Alpha</a>`, {
+      [`${START_URL}a.pdf`]: pdf(makePdf([["page one text here"], ["page two text here"], ["page three text"]])),
+    });
+    const result = await read(index, id("a.pdf"), mock.transport);
+    assert.ok(result.read);
+    assert.equal(result.nextPage, undefined);
+    assert.match(result.notice ?? "", /stopped at page 2 of 3.*not read/);
+  });
+
+  test("a complete read has no notice", async () => {
+    const { index, mock, id } = await course(`<a href="a.pdf">Alpha</a>`, { [`${START_URL}a.pdf`]: pdf(makePdf([["short"]])) });
+    const result = await read(index, id("a.pdf"), mock.transport);
+    assert.ok(result.read);
+    assert.equal(result.notice, undefined);
+  });
+});
+

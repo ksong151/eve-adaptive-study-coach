@@ -42,7 +42,7 @@ Example prompt in `npm run dev`: *"My course is https://cs144.github.io/. Quiz m
 4. **Course site only.** Links on the start page's own site (exact host) are readable, wherever they sit on that site. Other sites, including other subdomains, are listed only; reading one requires the learner to approve a specific directory URL on it, ending in `/` and not a site root, so naming one file never approves its folder.
 5. **Read by id only.** `read_resource` takes a resource id like `r31`, never a URL. External, blocked, and unsupported links are listed with their original URL and never requested.
 6. **Every request and redirect hop is checked before it is sent:** https, default port, no credentials, public hostname, no private IP literal, in scope, at most 3 redirects. Requests are read-only GETs through Vercel's [`guarded-fetch`](https://github.com/vercel-labs/guarded-fetch), which also checks DNS and pins the connected IP.
-7. **Limits.** HTML 2 MB / 15 s; PDF 15 MB / 30 s / 200 pages; per import 250 links, 30 network reads, 60 MB; content types `text/html` and `application/pdf` only.
+7. **Limits.** HTML 2 MB / 15 s; PDF 15 MB / 30 s / 200 pages; 400,000 characters of text per resource; per import 250 links, 30 network reads, 60 MB (bytes from rejected downloads count too); content types HTML (including XHTML) and PDF only. When text is cut at the character limit, the read result says the rest was not read.
 8. **Grounded citations.** Fetched text is labeled untrusted course material. `record_attempt` rejects sources that were never extracted and PDF pages with no extracted text.
 
 ## Supported formats
@@ -52,7 +52,7 @@ Example prompt in `npm run dev`: *"My course is https://cs144.github.io/. Quiz m
 | HTML | Text with block structure; scripts, styles, and nav removed |
 | PDF with a text layer | Text per page, page numbers kept |
 | Image-only PDF pages | Labeled as having no extractable text |
-| Google Docs, video, Canvas, Gradescope, Ed, zip, notebooks, images, plain text | Listed as "content unavailable" with the original link |
+| Google Docs, video, Canvas, Gradescope, Ed, Office files (pptx, docx, xlsx), source code, zip, notebooks, images, plain text, `http://` links | Listed as "content unavailable" with the original link |
 
 ## Progress storage and reset
 
@@ -86,6 +86,12 @@ READ r31 "Slides (week-2-tcp.pdf)" (8 pages)
 - On shared hosts such as `web.stanford.edu`, the homepage may link other courses' pages, and those are readable too. Redirects can land anywhere on the same host.
 - Generic link text ("PDF", "Slides") gets the file name added, which is uninformative for some URLs, such as Google Docs ending in `view`.
 - Resource ids follow page order, so re-importing a changed site can renumber them; saved attempts also keep title and URL.
+- Extracted text is cached and never refreshed. If a course updates a file at the same URL, delete `.study-coach/` to read the new version.
+- Each network read can follow up to 3 redirects, so the 30-read budget can mean more than 30 requests.
+- HTML is decoded as UTF-8; a page's declared charset is ignored.
+- `npm run inspect` uses the same `.study-coach/` folder as the agent, so it replaces that course's index and resets its read budget.
+- Not built for deployment: progress and cached text are written to a local folder.
+- The model may use terms the course material does not, and may save near-duplicate concept names that differ by more than case or spacing.
 - Single user, local files. Writes are serialized within one process; two processes sharing one `.study-coach/` folder can still conflict.
 - Question and feedback quality and the observation label depend on the model and are not validated assessments.
 - The learner-URL check needs the URL in the model's context; after compaction the learner may need to paste it again. It proves the learner wrote the URL, not that they meant to approve it.

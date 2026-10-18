@@ -147,3 +147,14 @@ describe("progress details", () => {
     assert.equal((await progressSummary()).totalAttempts, 3);
   });
 });
+
+describe("concurrent saves", () => {
+  test("parallel record_attempt calls are all kept", async () => {
+    await resetProgress();
+    const mock = mockTransport(toyCourseRoutes());
+    const index = await importCourse({ startUrl: START_URL, additionalScopes: [] }, { transport: mock.transport });
+    const base = { courseId: index.courseId, question: "q", learnerAnswer: "a", observation: "unclear" as const, feedbackSummary: "f", sources: [{ resourceId: "r1" }] };
+    await Promise.all(["p-1", "p-2", "p-3"].map((id, i) => recordAttempt({ ...base, attemptId: id, concept: `Concept ${i}` })));
+    assert.deepEqual((await loadProgress()).attempts.map((a) => a.id).sort(), ["p-1", "p-2", "p-3"]);
+  });
+});

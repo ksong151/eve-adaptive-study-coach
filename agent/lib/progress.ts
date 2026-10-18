@@ -1,6 +1,6 @@
 // Study observations, persisted locally across sessions. These are the
 // coach's notes about one answer, not a validated mastery measurement.
-import { readJson, writeJson, progressFile, contentFile } from "./store.ts";
+import { readJson, writeJson, progressFile, contentFile, withLock } from "./store.ts";
 import { CourseError, loadCourse, type CachedContent, type CourseIndex } from "./course.ts";
 
 export const OBSERVATIONS = ["demonstrated", "partially_demonstrated", "needs_review", "unclear"] as const;
@@ -60,7 +60,7 @@ async function resolveSource(
   return { resourceId: r.id, title: r.title, url: r.url, pages: ref.pages, contentRead: cached !== undefined };
 }
 
-export async function recordAttempt(input: {
+async function recordAttemptUnlocked(input: {
   attemptId: string;
   courseId: string;
   concept: string;
@@ -102,6 +102,11 @@ export async function recordAttempt(input: {
   progress.attempts.push(attempt);
   await writeJson(progressFile(), progress);
   return attempt;
+}
+
+/** Saves one attempt. Calls are serialized so parallel saves cannot drop each other. */
+export function recordAttempt(input: Parameters<typeof recordAttemptUnlocked>[0]): Promise<Attempt> {
+  return withLock(progressFile(), () => recordAttemptUnlocked(input));
 }
 
 /** The latest attempt per (course, concept), plus the concepts still marked for revisit. */

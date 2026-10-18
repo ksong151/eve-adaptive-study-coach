@@ -2,7 +2,7 @@
 // functions; tests call them directly with a mocked transport.
 import { readdir } from "node:fs/promises";
 import path from "node:path";
-import { readJson, writeJson, courseFile, contentFile, dataDir } from "./store.ts";
+import { readJson, writeJson, courseFile, contentFile, coursesLock, dataDir, withLock } from "./store.ts";
 import { buildScope, checkPublicHttpsUrl, describeScope, directoryPrefix, type CourseScope } from "./scope.ts";
 import { boundedFetch, FetchRejected, type FetchLimits, type SupportedContentType, type Transport } from "./fetcher.ts";
 import { discoverLinks, type ResourceKind, type ResourceStatus } from "./links.ts";
@@ -107,12 +107,8 @@ async function extract(bytes: Uint8Array, contentType: SupportedContentType): Pr
   return extractHtml(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
 }
 
-/**
- * Fetches one start page (the only request this makes), indexes its direct
- * links, and saves the index. Callers must already have confirmed that
- * startUrl and additionalScopes came from the learner.
- */
-export async function importCourse(
+/** Body of importCourse; call it only while holding the courses lock. */
+async function importCourseUnlocked(
   input: { startUrl: string; additionalScopes: readonly string[] },
   deps: { transport: Transport; signal?: AbortSignal },
 ): Promise<CourseIndex> {
@@ -251,11 +247,11 @@ function windowContent(index: CourseIndex, r: Resource, content: CachedContent, 
 }
 
 /**
- * Reads an indexed resource by id. Fetches only when the resource is
- * "readable" (in scope, supported format) and not already cached; failures
- * are recorded on the index and returned as read: false.
+ * Body of readResource; call it only while holding the courses lock. Fetches
+ * only when the resource is "readable" and not already cached; failures are
+ * recorded on the index and returned as read: false.
  */
-export async function readResource(
+async function readResourceUnlocked(
   input: { courseId: string; resourceId: string; page?: number; offset?: number },
   deps: { transport: Transport; signal?: AbortSignal },
 ): Promise<ReadResult> {
@@ -312,6 +308,29 @@ export async function readResource(
   }
   await writeJson(courseFile(index.courseId), index);
   return result;
+}
+
+/**
+ * Fetches one start page (the only request this makes), indexes its direct
+ * links, and saves the index. Callers must already have confirmed that
+ * startUrl and additionalScopes came from the learner.
+ */
+export function importCourse(
+  input: { startUrl: string; additionalScopes: readonly string[] },
+  deps: { transport: Transport; signal?: AbortSignal },
+): Promise<CourseIndex> {
+  return withLock(coursesLock(), () => importCourseUnlocked(input, deps));
+}
+
+/**
+ * Reads an indexed resource by id. Calls are serialized so concurrent reads
+ * cannot overspend the budget or overwrite each other's index updates.
+ */
+export function readResource(
+  input: { courseId: string; resourceId: string; page?: number; offset?: number },
+  deps: { transport: Transport; signal?: AbortSignal },
+): Promise<ReadResult> {
+  return withLock(coursesLock(), () => readResourceUnlocked(input, deps));
 }
 
 export async function listCourses(): Promise<Array<{ courseId: string; startUrl: string; pageTitle: string; importedAt: string; approvedScope: string }>> {

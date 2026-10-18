@@ -86,7 +86,7 @@ READ r31 "Slides (week-2-tcp.pdf)" (8 pages)
 - On shared hosts such as `web.stanford.edu`, the homepage may link other courses' pages, and those are readable too. Redirects can land anywhere on the same host.
 - Generic link text ("PDF", "Slides") gets the file name added, which is uninformative for some URLs, such as Google Docs ending in `view`.
 - Resource ids follow page order, so re-importing a changed site can renumber them; saved attempts also keep title and URL.
-- Single user, local files.
+- Single user, local files. Writes are serialized within one process; two processes sharing one `.study-coach/` folder can still conflict.
 - Question and feedback quality and the observation label depend on the model and are not validated assessments.
 - The learner-URL check needs the URL in the model's context; after compaction the learner may need to paste it again.
 

@@ -152,3 +152,24 @@ describe("failures, retries, and re-import", () => {
     assert.deepEqual(await listCourses(), []);
   });
 });
+
+describe("concurrent tool calls", () => {
+  test("parallel writes to the same file all succeed", async () => {
+    const { writeJson, readJson, dataDir } = await import("../agent/lib/store.ts");
+    const file = `${dataDir()}/parallel.json`;
+    await Promise.all([1, 2, 3, 4, 5].map((n) => writeJson(file, { n })));
+    assert.ok(typeof (await readJson<{ n: number }>(file))?.n === "number");
+  });
+
+  test("parallel reads cannot overspend the read budget", async () => {
+    const files = ["a.pdf", "b.pdf", "c.pdf", "d.pdf", "e.pdf"];
+    const routes = Object.fromEntries(files.map((f) => [`${START_URL}${f}`, pdf(makePdf([[`page ${f}`]]))]));
+    const { index, mock, id } = await course(files.map((f) => `<a href="${f}">File ${f}</a>`).join(" "), routes);
+    LIMITS.maxFetchesPerCourse = 3; // the import used one, so two reads remain
+    const results = await Promise.all(files.map((f) => read(index, id(f), mock.transport)));
+    assert.equal(results.filter((r) => r.read).length, 2);
+    assert.equal(results.filter((r) => !r.read && r.reason === "fetch_budget_exhausted").length, 3);
+    assert.equal(mock.requests.length, 3, "start page plus two reads");
+    assert.equal((await loadCourse(index.courseId)).usage.fetches, 3);
+  });
+});
